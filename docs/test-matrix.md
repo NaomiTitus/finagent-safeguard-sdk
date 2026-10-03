@@ -53,6 +53,23 @@ These are meta-tests over the registry. They are the mechanism that makes the EU
 | `test_every_instrument_has_review_by` | — | Manifest | Every instrument has a `review_by` date | `registry` |
 | `test_no_instrument_review_is_overdue` | — | `review_by` vs today | No overdue instrument. **The drift alarm** — goes red with no code change. Runs in the nightly CI job. | `registry` |
 
+
+**Added during implementation (Day 1).** Six rows beyond the original 18, each prompted by the
+code rather than by planning:
+
+| Test | Why it was needed |
+|---|---|
+| `test_obligation_text_is_a_substring_of_its_pinned_span` | Enforces "quote, don't paraphrase" on the registry itself, not just on test docstrings. The strongest single meta-test in the file, and the precursor to Day 6's entailment check. |
+| `test_constructing_verbatim_number_without_locus_is_rejected` | Proves the provenance rule fails at construction, not merely at audit |
+| `test_constructing_configured_number_without_rationale_is_rejected` | As above, for the operator-configured branch |
+| `test_only_pending_instruments_may_lack_a_celex` | PSD3/PSR has no CELEX; the type must permit that for pending instruments only |
+| `test_no_enforcing_obligation_cites_a_not_yet_applicable_instrument` | Non-trivial where the original pending-status test was vacuous: AMLR is in force but applies from 10 July 2027, so its obligations must be non-enforcing today |
+| `test_every_exemption_only_relaxes` | Structural guard on polarity -- an exemption can never create a duty |
+| `test_no_reference_point_is_enforced` | Keeps cited figures cited: the place a correct number goes so nobody invents one |
+
+Two planned rows were dropped as duplicates of section 10's corpus checks
+(`test_pinned_span_hash_matches_recorded`, `test_pinned_span_records_legal_value`).
+
 ---
 
 ## 2. Taxonomy and stacking decorators — `tests/test_decorators.py`
@@ -351,8 +368,8 @@ This matters here more than on an ordinary project, because the failure mode tha
 | Deliverable | Tests | Day |
 |---|---|---|
 | Corpus ingestion | 12 (all green) | 0 |
-| Registry + provenance | 18 | 1 |
-| Taxonomy + decorators | 9 | 1 |
+| Registry + provenance | 24 (all green) | 1 |
+| Taxonomy + decorators | 11 (all green) | 1 |
 | Agent gate | 7 | 2 |
 | Bypass suite | 4 | 2 |
 | Linter detection | 8 | 3 |
@@ -367,6 +384,6 @@ This matters here more than on an ordinary project, because the failure mode tha
 | Packaging + hygiene | 6 | 5 |
 | Entailment + eval | 9 | 6 |
 | Generated docs | 3 | 6 |
-| **Total** | **162** | |
+| **Total** | **170** | |
 
 Day 4 remains the heaviest at 47 tests and carries the keystone property. If the week slips, cut Art. 11 and Art. 13 coverage before cutting anything in §6a, §6b or §6f — the default duty, the Art. 16 limb structure and the keystone property are the project's correctness claim. Cut §15 first of all; it is explicitly optional.

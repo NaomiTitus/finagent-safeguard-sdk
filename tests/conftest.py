@@ -33,3 +33,10 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def frozen_today() -> _dt.date:
     return _dt.date(2026, 10, 3)
+
+
+@pytest.fixture(scope="session")
+def corpus() -> dict[str, object]:
+    from finagent_safeguard.regulation.ingest import load_corpus
+
+    return load_corpus(Path(__file__).resolve().parents[1] / "corpus")  # type: ignore[return-value]

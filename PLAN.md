@@ -158,6 +158,8 @@ Every numeric parameter in the registry declares `provenance`:
 
 This is the mechanism that makes the EUR 30 / EUR 500 error class hard to commit: writing the locus sends the author to the article.
 
+**Finding (2026-10-03):** EU legal texts spell small cardinals as words. RTS Art. 16(c) reads *"five consecutive individual remote electronic payment transactions"*, not "5", so a rendered numeral is not always a quotation. `NumericParameter` therefore carries a `verbatim_form` field holding the numeral exactly as the Official Journal writes it, and the provenance test checks that string. This makes the discipline stronger, not weaker: you cannot fill the field without reading the wording.
+
 ### 4.3 Addressee fields
 
 Every obligation carries `addressee` (`payment_service_provider` | `obliged_entity` | `controller` | `deployer`) and `sdk_role: contributes_only`. Exemptions requiring institutional facts carry `deployer_assertion_required`; unasserted means unavailable, never granted.
