@@ -1,0 +1,6 @@
+# Runtime: stdlib only by design (see PLAN.md section 11).
+# Development / CI:
+pytest>=8
+hypothesis>=6
+mypy>=1.8
+prometheus-client>=0.20

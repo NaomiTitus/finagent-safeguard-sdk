@@ -1,0 +1,10 @@
+{
+  "celex": "02015L2366-20250117",
+  "subdivision_id": "art_97",
+  "title": "Authentication",
+  "text": "Article 97 1. Member States shall ensure that a payment service provider applies strong customer authentication where the payer: (a) accesses its payment account online; (b) initiates an electronic payment transaction; (c) carries out any action through a remote channel which may imply a risk of payment fraud or other abuses. 2. With regard to the initiation of electronic payment transactions as referred to in point (b) of paragraph 1, Member States shall ensure that, for electronic remote payment transactions, payment service providers apply strong customer authentication that includes elements which dynamically link the transaction to a specific amount and a specific payee. 3. With regard to paragraph 1, Member States shall ensure that payment service providers have in place adequate security measures to protect the confidentiality and integrity of payment service users’ personalised security credentials. 4. Paragraphs 2 and 3 shall also apply where payments are initiated through a payment initiation service provider. Paragraphs 1 and 3 shall also apply when the information is requested through an account information service provider. 5. Member States shall ensure that the account servicing payment service provider allows the payment initiation service provider and the account information service provider to rely on the authentication procedures provided by the account servicing payment service provider to the payment service user in accordance with paragraphs 1 and 3 and, where the payment initiation service provider is involved, in accordance with paragraphs 1, 2 and 3.",
+  "sha256": "692acec3adf5e8f3f096e0e4976e9eefd3d519c3e241950d53bc5255438e013f",
+  "retrieved_at": "2026-10-03",
+  "source_url": "https://publications.europa.eu/resource/celex/02015L2366-20250117",
+  "legal_value": "consolidated_no_legal_value"
+}

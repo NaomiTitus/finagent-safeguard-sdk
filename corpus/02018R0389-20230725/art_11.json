@@ -1,0 +1,10 @@
+{
+  "celex": "02018R0389-20230725",
+  "subdivision_id": "art_11",
+  "title": "Contactless payments at point of sale",
+  "text": "Article 11 Payment service providers shall be allowed not to apply strong customer authentication, subject to compliance with the requirements laid down in Article 2, where the payer initiates a contactless electronic payment transaction provided that the following conditions are met: (a) the individual amount of the contactless electronic payment transaction does not exceed EUR 50; and (b) the cumulative amount of previous contactless electronic payment transactions initiated by means of a payment instrument with a contactless functionality from the date of the last application of strong customer authentication does not exceed EUR 150; or (c) the number of consecutive contactless electronic payment transactions initiated via the payment instrument offering a contactless functionality since the last application of strong customer authentication does not exceed five.",
+  "sha256": "c334eeacff23716a02dca099463d19af4e387270dac3c7819d8d76c2d1314a54",
+  "retrieved_at": "2026-10-03",
+  "source_url": "https://publications.europa.eu/resource/celex/02018R0389-20230725",
+  "legal_value": "consolidated_no_legal_value"
+}

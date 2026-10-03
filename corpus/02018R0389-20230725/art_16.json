@@ -1,0 +1,10 @@
+{
+  "celex": "02018R0389-20230725",
+  "subdivision_id": "art_16",
+  "title": "Low-value transactions",
+  "text": "Article 16 Payment service providers shall be allowed not to apply strong customer authentication, where the payer initiates a remote electronic payment transaction provided that the following conditions are met: (a) the amount of the remote electronic payment transaction does not exceed EUR 30; and (b) the cumulative amount of previous remote electronic payment transactions initiated by the payer since the last application of strong customer authentication does not exceed EUR 100; or (c) the number of previous remote electronic payment transactions initiated by the payer since the last application of strong customer authentication does not exceed five consecutive individual remote electronic payment transactions.",
+  "sha256": "c46e3ff542573d3fcc8df359301b91e3f02515120d255ad58d1ee5511bd6cba6",
+  "retrieved_at": "2026-10-03",
+  "source_url": "https://publications.europa.eu/resource/celex/02018R0389-20230725",
+  "legal_value": "consolidated_no_legal_value"
+}

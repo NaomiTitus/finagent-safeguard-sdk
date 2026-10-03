@@ -1,0 +1,10 @@
+{
+  "celex": "32023R1113",
+  "subdivision_id": "art_5",
+  "title": "Transfers of funds within the Union",
+  "text": "Article 5 1. By way of derogation from Article 4(1) and (2), where all payment service providers involved in the payment chain are established in the Union, transfers of funds shall be accompanied by at least the payment account number of both the payer and the payee or, where Article 4(3) applies, the unique transaction identifier, without prejudice to the information requirements laid down in Regulation (EU) No 260/2012, where applicable. 2. Notwithstanding paragraph 1, the payment service provider of the payer shall, within three working days of receiving a request for information from the payment service provider of the payee or from the intermediary payment service provider, make available the following: (a) for transfers of funds exceeding EUR 1 000, whether such transfers are carried out in a single transaction or in several transactions which appear to be linked, the information on the payer or the payee in accordance with Article 4; (b) for transfers of funds not exceeding EUR 1 000 that do not appear to be linked to other transfers of funds which, together with the transfer in question, exceed EUR 1 000, at least: (i) the names of the payer and of the payee; and (ii) the payment account numbers of the payer and of the payee or, where Article 4(3) applies, the unique transaction identifier. 3. By way of derogation from Article 4(4), in the case of transfers of funds referred to in paragraph 2, point (b), of this Article, the payment service provider of the payer need not verify the information on the payer unless the payment service provider of the payer: (a) has received the funds to be transferred in cash or in anonymous electronic money; or (b) has reasonable grounds for suspecting money laundering or terrorist financing.",
+  "sha256": "f796336d9b0500163042930515a55557bd9ac842f6a0b12683cdab27bf16ef85",
+  "retrieved_at": "2026-10-03",
+  "source_url": "https://publications.europa.eu/resource/celex/32023R1113",
+  "legal_value": "authentic"
+}

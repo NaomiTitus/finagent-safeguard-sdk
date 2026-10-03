@@ -1,0 +1,10 @@
+{
+  "celex": "02018R0389-20230725",
+  "subdivision_id": "art_13",
+  "title": "Trusted beneficiaries",
+  "text": "Article 13 1. Payment service providers shall apply strong customer authentication where a payer creates or amends a list of trusted beneficiaries through the payer's account servicing payment service provider. 2. Payment service providers shall be allowed not to apply strong customer authentication, subject to compliance with the general authentication requirements, where the payer initiates a payment transaction and the payee is included in a list of trusted beneficiaries previously created by the payer.",
+  "sha256": "252bdc4302233ee42c23b4567916751a4a4de6faf87c746e1a1ce459d26f56d4",
+  "retrieved_at": "2026-10-03",
+  "source_url": "https://publications.europa.eu/resource/celex/02018R0389-20230725",
+  "legal_value": "consolidated_no_legal_value"
+}

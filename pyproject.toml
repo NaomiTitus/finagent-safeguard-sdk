@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "finagent-safeguard"
+version = "0.1.0"
+description = "Shift-left developer governance for AI agents in EU/Nordic banking"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "hypothesis>=6", "mypy>=1.8", "prometheus-client>=0.20"]
+
+[project.scripts]
+finagent-lint = "finagent_safeguard.cli.linter:main"
+
+[tool.setuptools.packages.find]
+include = ["finagent_safeguard*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error"]
+
+[tool.mypy]
+strict = true

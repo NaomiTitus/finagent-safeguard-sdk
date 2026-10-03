@@ -1,0 +1,22 @@
+Legal texts under corpus/ are reproduced from EUR-Lex / CELLAR.
+
+  © European Union, 1998-2026
+  Source: https://publications.europa.eu (CELLAR)
+
+Reuse is authorised under Commission Decision 2011/833/EU on the reuse of
+Commission documents. Its conditions are observed as follows:
+
+  - the source of the documents is acknowledged (above, and per-file in the
+    `source_url` field);
+  - the original meaning or message of the documents is not distorted --
+    spans are stored verbatim, with markup stripped and whitespace
+    normalised, and each file records a SHA-256 of the exact stored text;
+  - the non-liability of the European Commission is noted.
+
+Consolidated texts (CELEX beginning with `0`) are editorial consolidations
+produced for documentation purposes. They have no legal value. Only the
+legislation published in the printed or electronic editions of the
+Official Journal of the European Union is authentic. Each file records this in its
+`legal_value` field.
+
+The European Union emblem is not reproduced.
