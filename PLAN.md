@@ -213,6 +213,17 @@ Source: CELLAR (`publications.europa.eu`) — SPARQL and REST, unauthenticated. 
 - Each chunk records `celex`, `eli_subdivision`, `text`, `sha256`, `retrieved_at`, `source_url`, `legal_value`.
 - `legal_value`: consolidated texts are editorial and have **no legal value**; only the OJ is authentic.
 - Known anomaly: CELLAR returned two conflicting end-of-validity dates for PSD2 (`9999-12-31` and `2026-06-18`) with no repealing act. Unexplained. **Do not encode.**
+- **Corpus identity.** Per-file hashes are self-consistency only: re-running the pin step
+  rewrites text and hash together, so any check that recomputes a file's hash from its own text
+  passes through an arbitrary corpus substitution. Identity therefore comes from a **set-level
+  digest over `(celex, subdivision_id, sha256, legal_value)`** with the expectation committed
+  **in test code, not in `corpus/MANIFEST.json`** -- a manifest compared against the files it was
+  generated from is self-consistency again. `legal_value` is in the tuple because flipping a
+  consolidated span to `authentic` is a claim about legal authenticity that nothing else would
+  catch. `retrieved_at` and `source_url` are excluded, so a re-pin yielding identical text does
+  not go red and the test does not become noise. No `--update-golden` affordance exists: updating
+  the constant is a hand edit in the same commit as the corpus change. Short form (12 hex) is the
+  Prometheus label; the full digest goes in `compliance_report.md`.
 - `NOTICE` file required (reuse under Commission Decision 2011/833/EU: acknowledge source, do not distort meaning, Commission non-liability; EU emblem not reproduced).
 
 ---

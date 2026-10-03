@@ -367,11 +367,12 @@ This matters here more than on an ordinary project, because the failure mode tha
 
 | Deliverable | Tests | Day |
 |---|---|---|
-| Corpus ingestion | 12 (all green) | 0 |
+| Corpus ingestion | 18 (all green) | 0 |
+| Corpus identity / golden membership | 13 (all green) | 1b |
 | Registry + provenance | 24 (all green) | 1 |
 | Taxonomy + decorators | 11 (all green) | 1 |
-| Agent gate | 7 | 2 |
-| Bypass suite | 4 | 2 |
+| Agent gate | 8 (all green) | 2 |
+| Bypass suite | 6 (all green) | 2 |
 | Linter detection | 8 | 3 |
 | Linter write path | 18 | 3 |
 | SCA obligation | 22 | 4 |
@@ -384,6 +385,6 @@ This matters here more than on an ordinary project, because the failure mode tha
 | Packaging + hygiene | 6 | 5 |
 | Entailment + eval | 9 | 6 |
 | Generated docs | 3 | 6 |
-| **Total** | **170** | |
+| **Total** | **186** | |
 
 Day 4 remains the heaviest at 47 tests and carries the keystone property. If the week slips, cut Art. 11 and Art. 13 coverage before cutting anything in §6a, §6b or §6f — the default duty, the Art. 16 limb structure and the keystone property are the project's correctness claim. Cut §15 first of all; it is explicitly optional.

@@ -63,7 +63,15 @@ def main() -> int:
             written += 1
             print(f"  {subdivision:8s} {len(provision.text):6d} chars  {provision.title}")
 
+    # Refresh the published artifact. The golden expectation lives in
+    # tests/test_corpus_manifest.py and is NOT regenerated here.
+    from finagent_safeguard.regulation.ingest import build_manifest, load_corpus
+
+    manifest = build_manifest(load_corpus(root))
+    (root / "MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n")
+
     print(f"\npinned {written} provisions", file=sys.stderr)
+    print(f"corpus_digest {manifest['corpus_digest']}", file=sys.stderr)
     return 0
 
 

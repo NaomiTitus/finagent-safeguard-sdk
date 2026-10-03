@@ -1,0 +1,155 @@
+{
+  "corpus_digest": "f57c993491ab7831396698bfe9a63cfd1d00a6151329f9740122e9ac114cb436",
+  "provision_count": 21,
+  "retrieved_earliest": "2026-10-03",
+  "retrieved_latest": "2026-10-03",
+  "provisions": [
+    {
+      "celex": "02015L2366-20250117",
+      "subdivision_id": "art_97",
+      "sha256": "692acec3adf5e8f3f096e0e4976e9eefd3d519c3e241950d53bc5255438e013f",
+      "legal_value": "consolidated_no_legal_value",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "02016R0679-20160504",
+      "subdivision_id": "art_25",
+      "sha256": "31eaf15ad0665d793a1ae1d3020d1b342255fddd3fe80a7422a6b6c3c024e323",
+      "legal_value": "consolidated_no_legal_value",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "02016R0679-20160504",
+      "subdivision_id": "art_32",
+      "sha256": "bd2b8abde48d9683c8b4fd4449833bdf0982d1616baaa1dbfd91bf09ce5fb794",
+      "legal_value": "consolidated_no_legal_value",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "02016R0679-20160504",
+      "subdivision_id": "art_44",
+      "sha256": "c78d00d63d430443e4c0b0914cd525083b030f487e85f10b43780addf61091c4",
+      "legal_value": "consolidated_no_legal_value",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "02016R0679-20160504",
+      "subdivision_id": "art_5",
+      "sha256": "2b8b560a171529b8099653698970dcf275a139e2bd20770ae0d2bbb1a830421a",
+      "legal_value": "consolidated_no_legal_value",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "02016R0679-20160504",
+      "subdivision_id": "art_87",
+      "sha256": "4887ed2321637291f2ac72c7463523188b1d7ed68d0ae51e81988b7766212249",
+      "legal_value": "consolidated_no_legal_value",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "02018R0389-20230725",
+      "subdivision_id": "anx_1",
+      "sha256": "744a7a422a4afca4b4e1acef2934e0e37293f27d6645ca46acf3808cf79f56da",
+      "legal_value": "consolidated_no_legal_value",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "02018R0389-20230725",
+      "subdivision_id": "art_11",
+      "sha256": "c334eeacff23716a02dca099463d19af4e387270dac3c7819d8d76c2d1314a54",
+      "legal_value": "consolidated_no_legal_value",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "02018R0389-20230725",
+      "subdivision_id": "art_13",
+      "sha256": "252bdc4302233ee42c23b4567916751a4a4de6faf87c746e1a1ce459d26f56d4",
+      "legal_value": "consolidated_no_legal_value",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "02018R0389-20230725",
+      "subdivision_id": "art_16",
+      "sha256": "c46e3ff542573d3fcc8df359301b91e3f02515120d255ad58d1ee5511bd6cba6",
+      "legal_value": "consolidated_no_legal_value",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "02018R0389-20230725",
+      "subdivision_id": "art_18",
+      "sha256": "5dcf2109f0759ebdcc33d2e71e06afed768bba161fbfb77f53cd87f67127df68",
+      "legal_value": "consolidated_no_legal_value",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "32022R2554",
+      "subdivision_id": "art_23",
+      "sha256": "e82045b66cd032bbadaacfa1cd7c24987d8f29f3a33f41eb520de95c06e4d839",
+      "legal_value": "authentic",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "32022R2554",
+      "subdivision_id": "art_28",
+      "sha256": "f053cb0e66d53a8cf7a9198d644e283388727e26b78a512cfc50761a1cb72e5c",
+      "legal_value": "authentic",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "32022R2554",
+      "subdivision_id": "art_64",
+      "sha256": "5f0973031447f9de89b64580989751eff0c29b8c919f6f4c3e14f4bfc5ff8286",
+      "legal_value": "authentic",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "32023R1113",
+      "subdivision_id": "art_4",
+      "sha256": "cb1d1f4d8ffb2a68c5ab9cce64ac5bb572d62d61415160a2bf6c4d2cc8fb6bb6",
+      "legal_value": "authentic",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "32023R1113",
+      "subdivision_id": "art_5",
+      "sha256": "f796336d9b0500163042930515a55557bd9ac842f6a0b12683cdab27bf16ef85",
+      "legal_value": "authentic",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "32024R1624",
+      "subdivision_id": "art_19",
+      "sha256": "fd38eda3356a91b4d38799b7457a26026e3280e8daea01422ae1baf95024124d",
+      "legal_value": "authentic",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "32024R1624",
+      "subdivision_id": "art_26",
+      "sha256": "1233049f3c4ad0a7e4053ebda47869065c02167a07596fa04c0720deff9fd0a9",
+      "legal_value": "authentic",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "32024R1624",
+      "subdivision_id": "art_69",
+      "sha256": "3a1dcd5f1376d76657b551695ba9e901763f52ed1d796a7e9097327ec982d0f2",
+      "legal_value": "authentic",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "32024R1624",
+      "subdivision_id": "art_80",
+      "sha256": "cf25b1c1d8ec1108d892d2c31b83d9f4bfb095837cfd7a85cdabac334c90f4de",
+      "legal_value": "authentic",
+      "retrieved_at": "2026-10-03"
+    },
+    {
+      "celex": "32024R1624",
+      "subdivision_id": "art_90",
+      "sha256": "2af83d277ca8c6f0e136a1c3e7c4b92afdc516cd082e20efb04851d9df344501",
+      "legal_value": "authentic",
+      "retrieved_at": "2026-10-03"
+    }
+  ]
+}

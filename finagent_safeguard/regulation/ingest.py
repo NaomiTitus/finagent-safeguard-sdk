@@ -201,3 +201,71 @@ def load_corpus(root: Path) -> dict[str, PinnedProvision]:
         provision = PinnedProvision.from_dict(json.loads(path.read_text()))
         provisions[f"{provision.celex}:{provision.subdivision_id}"] = provision
     return provisions
+
+
+# --------------------------------------------------------------------------
+# Corpus identity
+#
+# The per-file hashes above are self-consistency only: re-running the pin step
+# rewrites text and hash together, so an arbitrary corpus substitution passes
+# every check that recomputes a file's hash from its own text. What detects
+# substitution is an expectation held OUTSIDE corpus/ -- and what detects
+# addition or deletion is an expectation about membership.
+#
+# `legal_value` is part of the digest tuple deliberately. Flipping a
+# consolidated span to "authentic" is a claim about legal authenticity, and
+# nothing else in the suite would notice.
+#
+# `retrieved_at` and `source_url` are deliberately excluded: a re-pin that
+# produces byte-identical text with a fresh date must not go red, or the test
+# becomes noise and gets disabled.
+# --------------------------------------------------------------------------
+
+
+def digest_tuple(provision: PinnedProvision) -> tuple[str, str, str, str]:
+    """The fields that constitute a provision's identity."""
+    return (
+        provision.celex,
+        provision.subdivision_id,
+        provision.sha256,
+        provision.legal_value,
+    )
+
+
+def corpus_keys(provisions: dict[str, PinnedProvision]) -> tuple[str, ...]:
+    """Sorted membership of the corpus. Reviewable in a diff, unlike a hash."""
+    return tuple(sorted(provisions))
+
+
+def corpus_digest(provisions: dict[str, PinnedProvision]) -> str:
+    """One short token identifying the whole pinned corpus state."""
+    canonical = "\n".join(
+        "|".join(digest_tuple(provisions[key])) for key in corpus_keys(provisions)
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def corpus_label(provisions: dict[str, PinnedProvision]) -> str:
+    """Short form for a Prometheus label, by git short-hash convention."""
+    return corpus_digest(provisions)[:12]
+
+
+def build_manifest(provisions: dict[str, PinnedProvision]) -> dict[str, Any]:
+    """The published artifact. Not the oracle -- see tests/test_corpus_manifest.py."""
+    dates = sorted(p.retrieved_at for p in provisions.values())
+    return {
+        "corpus_digest": corpus_digest(provisions),
+        "provision_count": len(provisions),
+        "retrieved_earliest": dates[0].isoformat() if dates else None,
+        "retrieved_latest": dates[-1].isoformat() if dates else None,
+        "provisions": [
+            {
+                "celex": provisions[key].celex,
+                "subdivision_id": provisions[key].subdivision_id,
+                "sha256": provisions[key].sha256,
+                "legal_value": provisions[key].legal_value,
+                "retrieved_at": provisions[key].retrieved_at.isoformat(),
+            }
+            for key in corpus_keys(provisions)
+        ],
+    }
