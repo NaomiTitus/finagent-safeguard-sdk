@@ -269,7 +269,65 @@ Enums (`FinancialCategory.PSD2_PAYMENT_EXECUTION`, `GDPR_PII_PROCESSING`, `AML_T
 - **Entailment gate:** for every registry entry, re-fetch the pinned provision and report `TEXT_DRIFTED` / `CLAIM_UNSUPPORTED` / `SOURCE_UNREACHABLE` as distinct failures. **Never auto-propose a number** — a bot changing a threshold from retrieval is the laundering failure this project exists to prevent.
 - **Evidence:** `compliance_report.md` attached to the GitHub Step Summary.
 - **Hard requirement:** the full fast gate passes on a fresh clone with **no API key**. Any model interaction is recorded as a fixture. A separate opt-in job runs live.
-- Nightly cron: fail when any instrument's `review_by` date has passed.
+- Nightly cron: fail when any instrument's `review_by` date has passed. **This job makes no API
+  call and is free** -- do not conflate it with the entailment refresh below.
+
+### 5.4.1 Entailment refresh: cadence, cost and guards
+
+| | |
+|---|---|
+| Model | `claude-opus-5` (or `claude-opus-5-5`, same recommendation at $4/$20 with 0.05x cache reads) |
+| Cost per full refresh | **~$1.20** (~73K input, ~42K output incl. reasoning, rubric cached) |
+| Cadence | **PR-triggered and incremental** (changed provisions only) + a **quarterly** full sweep |
+| Annual | **under $20** |
+| Default CI path | replays recorded cassettes -- **$0**, no API key |
+
+**Not nightly.** A nightly full refresh is ~$445/yr re-verifying 21 provisions that have not moved
+since the previous run. PR-triggered catches drift at the moment it is introduced, which is also
+when it is cheapest to fix.
+
+**Output is ~74% of the bill**, because adaptive thinking bills as output. Effort is therefore the
+dominant lever -- roughly 4x larger than caching. Do **not** reflexively lower it: a false
+`CONFIRMED` is the only genuinely harmful verdict, and the discrimination that degrades first at
+low effort is exactly the one the check exists for (noticing that "shall be allowed not to apply
+... where the amount does not exceed EUR 30" is a permission ceiling, not a trigger). Start at
+`high`; step to `medium` only if a held-out fixture set containing a deliberately wrong Art. 16
+entry still fails it.
+
+**Cache the rubric.** It is ~2,204 tokens re-sent 21 times -- 63% of all input tokens -- and
+clears Opus 5's 512-token minimum fourfold. One `cache_control` block saves ~14%. Assert
+`cache_read_input_tokens > 0` on the second call, or the win disappears silently on the next
+prompt-assembly edit.
+
+**Skip the Batch API.** 50% off both directions, but at the recommended cadence it saves ~$2.44/yr
+and costs an async state machine in CI (submit, poll, results keyed by `custom_id` arriving in any
+order, handle `expired`). Worth it only if the cadence ever becomes nightly.
+
+**Cost trap -- the live call must be gated on the trigger, not on key presence.** Four orders of
+magnitude separate the intended design from the misconfigured one, and *nothing in the build
+output distinguishes them* -- the check passes either way, just thousands of times:
+
+| Misconfiguration | Refreshes/yr | Annual |
+|---|---|---|
+| Intended: `paths:`-filtered, incremental | ~50 | ~$7 |
+| Wired to `on: push` (1,000 pushes) | 1,000 | ~$1,400 |
+| ...x a 6-job matrix with no leg guard | 6,000 | ~$8,500 |
+| ...x 3 rerun retries | 18,000 | ~$25,500 |
+
+Three guards, all cheap:
+
+1. `paths:` filter on `corpus/**` and `finagent_safeguard/regulation/registry.py`, plus
+   `concurrency: {group: ..., cancel-in-progress: true}` so successive pushes to one PR do not
+   each fire.
+2. Pin the live refresh to **one** matrix leg, or to a separate job the matrix does not fan out.
+3. A hard spend ceiling **in the runner, not in the plan**: count provisions before the loop,
+   accumulate `response.usage` per call, and fail the job above ~150K cumulative tokens (2x
+   expected). A loop retrying a `SOURCE_UNREACHABLE` provision is the realistic way to blow the
+   estimate from inside a single run.
+
+Set the client `timeout` generously rather than tightly: a client-side timeout *after* the server
+has already generated the response bills for it **and** retries, which on a 2,000-output-token
+reasoning call is a real double charge. `max_tokens` (4096) is a runaway guard, not a budget.
 
 ### 5.5 Observability — `telemetry/metrics.py`, `docker-compose.yml`
 
