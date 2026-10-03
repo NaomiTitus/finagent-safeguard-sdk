@@ -1,0 +1,100 @@
+"""The inversion-of-control construction gate.
+
+A developer hands the framework their tools; the framework refuses to build an
+agent around any tool that has not been classified. In shift-left scope this is
+the entire enforcement surface -- there is no runtime interception behind it --
+so it fails closed at construction or it does nothing at all.
+
+Two design choices exist specifically to resist being routed around, and each
+has a test in ``tests/bypass/`` holding it in place:
+
+1. **Enforcement is a module-level function**, called from ``__init__``. It is
+   not a method, so a subclass has nothing to override. ``BaseCompliantAgent``
+   deliberately exposes no attribute whose name a developer would reach for
+   when trying to neuter the check.
+2. **Classification is read from the registry**, keyed by ``module:qualname``,
+   never from an attribute on the function object. Setting
+   ``fn._regulated = True`` by hand proves nothing and buys nothing.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from typing import Any
+
+from finagent_safeguard.core.decorators import lookup, registry_key
+from finagent_safeguard.taxonomy.policies import FinancialCategory
+
+__all__ = ["BaseCompliantAgent", "UnregulatedToolError"]
+
+
+class UnregulatedToolError(Exception):
+    """An agent was constructed around a tool that carries no classification.
+
+    Deliberately not an ``ImportError``: nothing failed to import. This is a
+    configuration error, and borrowing ``ImportError``'s meaning would mislead
+    both the developer and any tooling that inspects the exception type.
+    """
+
+
+def _report(unclassified: Sequence[str]) -> str:
+    listed = "\n".join(f"  - {name}" for name in unclassified)
+    return (
+        f"{len(unclassified)} tool(s) passed to this agent carry no regulatory "
+        f"classification:\n{listed}\n\n"
+        "Classify each one before constructing the agent:\n\n"
+        "    from finagent_safeguard.core.decorators import regulated_tool\n"
+        "    from finagent_safeguard.taxonomy.policies import FinancialCategory\n\n"
+        "    @regulated_tool(FinancialCategory.PSD2_PAYMENT_EXECUTION)\n"
+        "    def your_tool(...): ...\n\n"
+        "Decorators stack, so a tool handling both monetary flow and personal "
+        "data carries both categories. Run `finagent-lint --fix` to insert them."
+    )
+
+
+def _require_classification(
+    tools: Sequence[Callable[..., Any]],
+) -> frozenset[FinancialCategory]:
+    """Return the union of declared categories, or refuse to proceed.
+
+    Module-level by design: see this module's docstring, point 1.
+    """
+    categories: set[FinancialCategory] = set()
+    unclassified: list[str] = []
+
+    for tool in tools:
+        registration = lookup(tool)
+        if registration is None:
+            unclassified.append(registry_key(tool))
+        else:
+            categories |= registration.categories
+
+    if unclassified:
+        raise UnregulatedToolError(_report(unclassified))
+
+    return frozenset(categories)
+
+
+class BaseCompliantAgent:
+    """An agent whose tools are all classified, or which does not exist."""
+
+    def __init__(
+        self,
+        *,
+        agent_name: str,
+        tools: Sequence[Callable[..., Any]],
+        instructions: str = "",
+    ) -> None:
+        self.agent_name = agent_name
+        self.instructions = instructions
+        self.tools: tuple[Callable[..., Any], ...] = tuple(tools)
+        # Raises before the instance is usable. An agent that got past this
+        # line has every tool classified.
+        self.categories: frozenset[FinancialCategory] = _require_classification(self.tools)
+
+    def __repr__(self) -> str:
+        names = sorted(c.value for c in self.categories)
+        return (
+            f"{type(self).__name__}(agent_name={self.agent_name!r}, "
+            f"tools={len(self.tools)}, categories={names})"
+        )
