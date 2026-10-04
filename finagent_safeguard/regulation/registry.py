@@ -85,7 +85,13 @@ _OJ_MONTHS: dict[str, int] = {
     )
 }
 
-OJ_DATE_RE: Final = re.compile(r"\b(\d{1,2}) (" + "|".join(_OJ_MONTHS) + r") (\d{4})\b")
+#: Whitespace is deliberately permissive. The extraction pipeline does not normalise
+#: (one pinned span carries "European Union ."), and a date written with a
+#: non-breaking space would otherwise be invisible to the undeclared-date scan.
+_WS = r"[\s\u00a0]+"
+OJ_DATE_RE: Final = re.compile(
+    r"\b(\d{1,2})" + _WS + r"(" + "|".join(_OJ_MONTHS) + r")" + _WS + r"(\d{4})\b"
+)
 
 
 def _parse_oj_date(verbatim: str, expected: _dt.date, context: str) -> None:
@@ -191,11 +197,27 @@ class StagedApplication:
 
     date: _dt.date
     verbatim_form: str
-    #: Verbatim description of the class, as the article words it.
-    applies_to: str
+    #: The WHOLE carve-out clause, verbatim. This is the pinned claim: quoting the
+    #: date and the class as two separate fragments pins neither their adjacency nor
+    #: the mapping between them, so "obliged entities" (all of them) and the article's
+    #: actual "obliged entities referred to in Article 3, points (3)(n) and (o)" are
+    #: indistinguishable. One contiguous quote pins the relationship.
+    verbatim_clause: str
+    #: A human-readable label for the class. Descriptive only -- ``verbatim_clause``
+    #: is the authority, and this field is not an independently pinned claim.
+    applies_to: str = ""
 
     def __post_init__(self) -> None:
-        _parse_oj_date(self.verbatim_form, self.date, self.applies_to)
+        _parse_oj_date(self.verbatim_form, self.date, self.verbatim_clause[:40])
+        if self.verbatim_form not in self.verbatim_clause:
+            raise ValueError(
+                f"carve-out clause does not contain its own date "
+                f"{self.verbatim_form!r}"
+            )
+        if self.applies_to and self.applies_to not in self.verbatim_clause:
+            raise ValueError(
+                f"applies_to {self.applies_to!r} is not wording from the clause"
+            )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -513,6 +535,11 @@ TFR_ART_5_2_B = Provision(
     paragraph="2",
     point="b",
     subdivision_id="art_5",
+    obligation_text=(
+        "transfers of funds not exceeding EUR 1 000 that do not appear to be linked "
+        "to other transfers of funds which, together with the transfer in question, "
+        "exceed EUR 1 000"
+    ),
     tags=("defines_the_bracket", "not_a_reporting_threshold"),
 )
 
@@ -772,6 +799,10 @@ APPLICATION_DATES: tuple[ApplicationDate, ...] = (
             StagedApplication(
                 date=_dt.date(2029, 7, 10),
                 verbatim_form="10 July 2029",
+                verbatim_clause=(
+                    "except in relation to obliged entities referred to in Article 3, "
+                    "points (3)(n) and (o), to which it shall apply from 10 July 2029"
+                ),
                 applies_to=(
                     "obliged entities referred to in Article 3, points (3)(n) and (o)"
                 ),

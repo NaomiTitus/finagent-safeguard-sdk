@@ -99,7 +99,7 @@ class TestQuotation:
             span = corpus[provision.corpus_key]
             assert provision.obligation_text in span.text, provision.id
             checked += 1
-        assert checked == 14, f"quotation count moved to {checked}; update deliberately"
+        assert checked == 15, f"quotation count moved to {checked}; update deliberately"
 
     def test_every_provision_resolves_to_a_pinned_corpus_entry(
         self, corpus: dict[str, Any]
@@ -230,12 +230,12 @@ class TestNoOrphans:
     def test_every_declared_provision_is_reachable(self) -> None:
         from finagent_safeguard.regulation.citation import Provision
 
-        declared = {
-            f"{v.corpus_key}|{v.id}"
-            for v in vars(reg).values()
-            if isinstance(v, Provision)
-        }
-        reachable = {f"{p.corpus_key}|{p.id}" for p in REGISTRY.provisions()}
+        # repr(), matching provisions(). Keying on corpus_key|id collapses
+        # field-distinct provisions onto one citation, so an orphan carrying a
+        # fabricated obligation_text is invisible -- the same mistake this PR
+        # fixes in provisions() three lines of code away.
+        declared = {repr(v) for v in vars(reg).values() if isinstance(v, Provision)}
+        reachable = {repr(p) for p in REGISTRY.provisions()}
         orphans = sorted(declared - reachable)
         assert not orphans, f"declared but unreachable from the registry: {orphans}"
 
@@ -301,22 +301,55 @@ class TestStagedApplicationDates:
                 "An undeclared date is a staged application the registry is flattening."
             )
 
-    def test_carve_out_dates_appear_in_the_span(self, corpus: dict[str, Any]) -> None:
+    def test_carve_out_clauses_are_verbatim(self, corpus: dict[str, Any]) -> None:
+        """The whole clause, not two fragments.
+
+        Quoting the date and the class separately pins neither their adjacency nor
+        the mapping between them: "obliged entities" and the article's actual
+        "obliged entities referred to in Article 3, points (3)(n) and (o)" are both
+        substrings, and they mean different things.
+        """
+        checked = 0
         for entry in REGISTRY.application_dates():
             span = corpus[entry.locus.corpus_key]
             for carve in entry.carve_outs:
-                assert carve.verbatim_form in span.text, carve.verbatim_form
-                assert carve.applies_to in span.text, (
-                    f"the class {carve.applies_to!r} is not worded that way in "
-                    f"{entry.locus.id}"
+                assert carve.verbatim_clause in span.text, (
+                    f"{entry.locus.id}: carve-out clause is not verbatim"
                 )
+                checked += 1
+        assert checked == 1, f"carve-out count moved to {checked}; update deliberately"
 
-    def test_amlr_declares_its_staged_class(self) -> None:
-        amlr = next(
-            e for e in REGISTRY.application_dates() if e.instrument.short_name == "AMLR"
-        )
-        assert amlr.carve_outs, "AMLR Art. 90 stages its application; declare the carve-out"
-        assert amlr.carve_outs[0].date.year == 2029
+    def test_general_date_is_stated_outside_every_carve_out(
+        self, corpus: dict[str, Any]
+    ) -> None:
+        """Generalises what a hard-coded `carve_outs[0].date.year == 2029` could not.
+
+        If an author swapped the general and staged dates, the general date would be
+        found only inside the carve-out clause. Removing the clauses and requiring the
+        general date to survive catches that for any article, not just AMLR.
+        """
+        for entry in REGISTRY.application_dates():
+            remainder = corpus[entry.locus.corpus_key].text
+            for carve in entry.carve_outs:
+                remainder = remainder.replace(carve.verbatim_clause, " ")
+            assert entry.verbatim_form in remainder, (
+                f"{entry.instrument.short_name}: {entry.verbatim_form!r} appears only "
+                "inside a carve-out clause, so it is a staged date, not the general one"
+            )
+
+    def test_an_article_that_stages_its_application_declares_a_carve_out(
+        self, corpus: dict[str, Any]
+    ) -> None:
+        """No instrument named by hand: if the span states more than one date, the
+        entry must declare the extras."""
+        for entry in REGISTRY.application_dates():
+            span = corpus[entry.locus.corpus_key]
+            dates = {m.group(0) for m in reg.OJ_DATE_RE.finditer(span.text)}
+            if len(dates) > 1:
+                assert entry.carve_outs, (
+                    f"{entry.locus.id} states {sorted(dates)}; a single date field "
+                    "flattens a staged application"
+                )
 
     def test_locus_must_belong_to_the_instrument(self) -> None:
         import datetime as _dt
