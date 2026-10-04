@@ -33,6 +33,7 @@ from finagent_safeguard.regulation.citation import (
 __all__ = [
     "REGISTRY",
     "Addressee",
+    "ApplicationDate",
     "Exemption",
     "NumericParameter",
     "Obligation",
@@ -145,6 +146,26 @@ class Exemption:
     deployer_assertion_required: str = ""
     #: Literal, not str: the type system forbids an exemption that creates a duty.
     effect: Literal["relaxes"] = "relaxes"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ApplicationDate:
+    """When an instrument applies, with a citation to the article that says so.
+
+    Every number in this registry names its source; dates were the one class of fact
+    exempt from that discipline, living in prose ``note`` fields. Dates are also exactly
+    what was wrong in the AI Act case, where a published deadline moved.
+    """
+
+    instrument: Instrument
+    date: _dt.date
+    locus: Provision
+    #: The date as the Official Journal writes it, e.g. "10 July 2027".
+    verbatim_form: str
+
+    @property
+    def as_cited(self) -> str:
+        return self.verbatim_form
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -408,7 +429,16 @@ TFR_ART_4_4 = Provision(
         "information referred to in paragraph 1"
     ),
 )
-TFR_ART_5 = Provision(instrument=TFR, article="5", subdivision_id="art_5")
+TFR_ART_5_3 = Provision(
+    instrument=TFR,
+    article="5",
+    paragraph="3",
+    subdivision_id="art_5",
+    tags=("derogation_from_verification", "not_a_reporting_threshold"),
+)
+
+AMLR_ART_90 = Provision(instrument=AMLR, article="90", subdivision_id="art_90")
+DORA_ART_64 = Provision(instrument=DORA, article="64", subdivision_id="art_64")
 
 DORA_ART_23 = Provision(instrument=DORA, article="23", subdivision_id="art_23")
 DORA_ART_28_3 = Provision(
@@ -633,6 +663,37 @@ REFERENCE_POINTS: tuple[ReferencePoint, ...] = (
         ),
         applies_from=_dt.date(2027, 7, 10),
     ),
+    ReferencePoint(
+        parameter=NumericParameter(
+            name="tfr.art5.3.verification_derogation",
+            value=Decimal("1000"),
+            currency="EUR",
+            provenance=Provenance.REGULATORY_VERBATIM,
+            locus=TFR_ART_5_3,
+        ),
+        governs=(
+            "Derogation from the Art. 4(4) duty to verify the accuracy of payer "
+            "information, for intra-Union transfers not exceeding this amount and not "
+            "appearing linked to others that together exceed it. Governs VERIFICATION, "
+            "not reporting -- the figure is commonly misdescribed as a reporting "
+            "threshold, and it is not one."
+        ),
+    ),
+)
+
+APPLICATION_DATES: tuple[ApplicationDate, ...] = (
+    ApplicationDate(
+        instrument=AMLR,
+        date=_dt.date(2027, 7, 10),
+        locus=AMLR_ART_90,
+        verbatim_form="10 July 2027",
+    ),
+    ApplicationDate(
+        instrument=DORA,
+        date=_dt.date(2025, 1, 17),
+        locus=DORA_ART_64,
+        verbatim_form="17 January 2025",
+    ),
 )
 
 # --------------------------------------------------------------------------
@@ -644,6 +705,7 @@ class Registry:
     _obligations: tuple[Obligation, ...]
     _exemptions: tuple[Exemption, ...]
     _reference_points: tuple[ReferencePoint, ...]
+    _application_dates: tuple[ApplicationDate, ...]
 
     def instruments(self) -> tuple[Instrument, ...]:
         return self._instruments
@@ -656,6 +718,9 @@ class Registry:
 
     def reference_points(self) -> tuple[ReferencePoint, ...]:
         return self._reference_points
+
+    def application_dates(self) -> tuple[ApplicationDate, ...]:
+        return self._application_dates
 
     def exemption(self, exemption_id: str) -> Exemption:
         for exemption in self._exemptions:
@@ -682,6 +747,7 @@ class Registry:
             for limb in e.limbs
             if limb.locus is not None
         ]
+        candidates += [d.locus for d in self._application_dates]
         for provision in candidates:
             key = f"{provision.corpus_key}|{provision.id}"
             if key not in seen:
@@ -694,4 +760,5 @@ REGISTRY = Registry(
     _obligations=OBLIGATIONS,
     _exemptions=EXEMPTIONS,
     _reference_points=REFERENCE_POINTS,
+    _application_dates=APPLICATION_DATES,
 )
