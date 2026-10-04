@@ -134,3 +134,61 @@ test fixes.
   before mutating, and let the runner do the reverting.
   → RESOLVED by restoring the implementation; prevention is the CI gate, which would have
   caught this on push rather than two steps later.
+
+---
+
+## 2026-10-04 — `fix/registry-vacuity` — session three, and F-010 repeating
+
+Third cold review returned `changes needed` with four blocking or high findings. All are
+fixed; the review also stated plainly where the defences hold, which the previous one did not.
+
+### Flagged and fixed
+
+- **AMLR Art. 90 stages its application.** 10 July 2027 generally, 10 July 2029 for obliged
+  entities under Art. 3(3)(n) and (o). `ApplicationDate` carried one date, so a caller got an
+  answer two years early for that class with nothing hinting an exception existed. The class
+  docstring says dates are what went wrong in the AI Act case; the first instrument it covered
+  was the one with a staged date, and it flattened it. → `carve_outs`, plus a test asserting
+  every Official-Journal-form date in the cited span is accounted for. This also narrows the
+  wrong-clause risk: picking 2029 as the general date now leaves 2027 undeclared and fails.
+- **Nothing tied `instrument` to `locus`.** An AMLR date citing DORA Art. 64 passed every
+  check. → rejected at construction.
+- **`provisions()` deduped on `corpus_key|id`**, silently dropping a second provision with the
+  same citation but a different `obligation_text`, so a fabricated quotation never reached the
+  substring check. → dedup on the whole frozen provision.
+- **`strptime("%d %B %Y")` resolves months through `LC_TIME`.** A host app that had called
+  `setlocale(LC_TIME, "de_DE")` would make the module raise at import. → explicit English
+  month map; verified under `de_DE` and `fr_FR`.
+
+### Deferred, with triggers
+
+- **F-011** — paragraph-level citations are unvalidated because pinning is article-level.
+  Mutation R13 cites a nonexistent `5(9)(z)` and passes. Trigger: Day 6 entailment.
+- Two-way-lock exit: setting `applies_from` to the sentinel removes an instrument from both
+  the covered and documented sets. Trigger: next registry PR.
+- Orphan test cannot see `Provision`s held inside a module-level container, only bound names.
+  Trigger: next registry PR.
+
+### Process finding — F-012, and it is the serious one
+
+**F-010 recurred within the hour.** `git checkout -- registry.py`, used again to revert a
+mutation experiment by hand, again discarded uncommitted implementation work. The F-010 entry
+recorded the lesson in prose; prose did not change the behaviour.
+
+Then, recovering, I re-applied the edits, ran the suite, and **committed a state where the
+suite errored on collection** — one string replacement had silently failed to match because
+the target text I supplied omitted a docstring. The commit message asserted "89 passing". It
+was not true at commit time.
+
+Two concrete rules, not aspirations:
+
+1. **Commit before mutating.** The mutation runner reverts safely and verifies the tree; a
+   hand `git checkout --` does not know what is uncommitted. If work is committed first, a
+   bad revert costs nothing.
+2. **A silent `str.replace` miss is a defect class.** Replacements must assert the anchor was
+   found. Where an edit is large, anchor on indices and verify, or the file is left in a state
+   nobody inspected.
+
+Both failures share a shape: an assertion about state made from memory of a command run
+earlier, not from the state itself. That is precisely what Layer 0 exists to catch, and
+neither was caught by me.
