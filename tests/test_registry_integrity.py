@@ -279,3 +279,52 @@ class TestApplicationDateProvenance:
         assert missing == {"PSD2", "RTS on SCA", "GDPR", "TFR"}, (
             f"date-provenance gap changed: {sorted(missing)}"
         )
+
+
+class TestStagedApplicationDates:
+    """An article that states two application dates must have both declared.
+
+    AMLR Art. 90 applies from 10 July 2027 "except in relation to obliged entities
+    referred to in Article 3, points (3)(n) and (o), to which it shall apply from
+    10 July 2029". A single date field answers two years early for that class.
+    """
+
+    def test_every_date_in_the_span_is_accounted_for(self, corpus: dict[str, Any]) -> None:
+        for entry in REGISTRY.application_dates():
+            span = corpus[entry.locus.corpus_key]
+            in_text = {m.group(0) for m in reg.OJ_DATE_RE.finditer(span.text)}
+            declared = {v for _d, v in entry.all_dates}
+            undeclared = sorted(in_text - declared)
+            assert not undeclared, (
+                f"{entry.instrument.short_name} {entry.locus.id} states "
+                f"{sorted(in_text)} but the registry declares only {sorted(declared)}. "
+                "An undeclared date is a staged application the registry is flattening."
+            )
+
+    def test_carve_out_dates_appear_in_the_span(self, corpus: dict[str, Any]) -> None:
+        for entry in REGISTRY.application_dates():
+            span = corpus[entry.locus.corpus_key]
+            for carve in entry.carve_outs:
+                assert carve.verbatim_form in span.text, carve.verbatim_form
+                assert carve.applies_to in span.text, (
+                    f"the class {carve.applies_to!r} is not worded that way in "
+                    f"{entry.locus.id}"
+                )
+
+    def test_amlr_declares_its_staged_class(self) -> None:
+        amlr = next(
+            e for e in REGISTRY.application_dates() if e.instrument.short_name == "AMLR"
+        )
+        assert amlr.carve_outs, "AMLR Art. 90 stages its application; declare the carve-out"
+        assert amlr.carve_outs[0].date.year == 2029
+
+    def test_locus_must_belong_to_the_instrument(self) -> None:
+        import datetime as _dt
+
+        with pytest.raises(ValueError, match="must be traceable"):
+            reg.ApplicationDate(
+                instrument=reg.AMLR,
+                date=_dt.date(2025, 1, 17),
+                locus=reg.DORA_ART_64,
+                verbatim_form="17 January 2025",
+            )

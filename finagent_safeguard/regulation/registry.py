@@ -16,11 +16,12 @@ Three rules carry this module:
 from __future__ import annotations
 
 import datetime as _dt
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
-from typing import Literal
+from typing import Final, Literal
 
 from finagent_safeguard.regulation.citation import (
     NOT_YET_DETERMINED,
@@ -38,8 +39,10 @@ __all__ = [
     "NumericParameter",
     "Obligation",
     "Provenance",
+    "OJ_DATE_RE",
     "ReferencePoint",
     "Registry",
+    "StagedApplication",
     "RiskBasedObligation",
     "SdkRole",
     "eu_numeral",
@@ -66,6 +69,40 @@ class Addressee(StrEnum):
 
 class SdkRole(StrEnum):
     CONTRIBUTES_ONLY = "contributes_only"
+
+
+#: English month names, spelled out. Deliberately not strptime("%B"), which resolves
+#: through LC_TIME: a host application that has called setlocale(LC_TIME, "de_DE")
+#: would otherwise make this module fail at import.
+_OJ_MONTHS: dict[str, int] = {
+    m: i
+    for i, m in enumerate(
+        (
+            "January February March April May June July August September "
+            "October November December"
+        ).split(),
+        start=1,
+    )
+}
+
+OJ_DATE_RE: Final = re.compile(r"\b(\d{1,2}) (" + "|".join(_OJ_MONTHS) + r") (\d{4})\b")
+
+
+def _parse_oj_date(verbatim: str, expected: _dt.date, context: str) -> None:
+    """Assert a quoted date parses, in Official Journal form, to ``expected``."""
+    match = OJ_DATE_RE.fullmatch(verbatim.strip())
+    if match is None:
+        raise ValueError(
+            f"{context}: {verbatim!r} is not a date in Official Journal form "
+            '(e.g. "10 July 2027")'
+        )
+    day, month, year = match.groups()
+    parsed = _dt.date(int(year), _OJ_MONTHS[month], int(day))
+    if parsed != expected:
+        raise ValueError(
+            f"{context}: {verbatim!r} parses to {parsed}, but the declared date "
+            f"is {expected}"
+        )
 
 
 def eu_numeral(value: Decimal, currency: str | None) -> str:
@@ -149,6 +186,19 @@ class Exemption:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class StagedApplication:
+    """A carve-out: a named class of addressees to whom a different date applies."""
+
+    date: _dt.date
+    verbatim_form: str
+    #: Verbatim description of the class, as the article words it.
+    applies_to: str
+
+    def __post_init__(self) -> None:
+        _parse_oj_date(self.verbatim_form, self.date, self.applies_to)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ApplicationDate:
     """When an instrument applies, with a citation to the article that says so.
 
@@ -158,36 +208,42 @@ class ApplicationDate:
     """
 
     instrument: Instrument
+    #: The GENERAL application date. Classes of addressee with a different date go in
+    #: ``carve_outs``: AMLR Art. 90 stages its application, and a lone date field
+    #: silently answers two years early for the staged class.
     date: _dt.date
     locus: Provision
     #: The date as the Official Journal writes it, e.g. "10 July 2027".
     verbatim_form: str
+    carve_outs: tuple[StagedApplication, ...] = ()
 
     def __post_init__(self) -> None:
-        """The quoted form must parse to the declared date.
+        """Quoted form must parse to the declared date, and cite its own instrument.
 
-        Without this, the only machine-checked fact is that *some* string occurs
-        somewhere in the article -- "2025", "January", even "." would pass a
-        substring check, and a contradictory pair (date 2027 quoted as "10 July
-        2029") would pass while ``as_cited`` returned the wrong value.
+        Without the first check, the only machine-checked fact is that *some* string
+        occurs somewhere in the article -- "2025", "January", even "." would satisfy a
+        substring check, and a contradictory pair would pass while ``as_cited``
+        returned the wrong value. Without the second, a date could cite an article of
+        an entirely different regulation.
         """
-        try:
-            parsed = _dt.datetime.strptime(self.verbatim_form, "%d %B %Y").date()
-        except ValueError as exc:
+        _parse_oj_date(self.verbatim_form, self.date, self.instrument.short_name)
+        if self.locus.instrument is not self.instrument:
             raise ValueError(
-                f"{self.instrument.short_name}: verbatim_form "
-                f"{self.verbatim_form!r} is not a date in Official Journal form "
-                '(e.g. "10 July 2027")'
-            ) from exc
-        if parsed != self.date:
-            raise ValueError(
-                f"{self.instrument.short_name}: verbatim_form "
-                f"{self.verbatim_form!r} parses to {parsed}, but date is {self.date}"
+                f"{self.instrument.short_name}: locus cites "
+                f"{self.locus.instrument.short_name} ({self.locus.id}). A date must be "
+                "traceable to an article of the instrument it describes."
             )
 
     @property
     def as_cited(self) -> str:
         return self.verbatim_form
+
+    @property
+    def all_dates(self) -> tuple[tuple[_dt.date, str], ...]:
+        """Every date this entry accounts for, general and staged."""
+        return ((self.date, self.verbatim_form),) + tuple(
+            (c.date, c.verbatim_form) for c in self.carve_outs
+        )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -712,6 +768,15 @@ APPLICATION_DATES: tuple[ApplicationDate, ...] = (
         date=_dt.date(2027, 7, 10),
         locus=AMLR_ART_90,
         verbatim_form="10 July 2027",
+        carve_outs=(
+            StagedApplication(
+                date=_dt.date(2029, 7, 10),
+                verbatim_form="10 July 2029",
+                applies_to=(
+                    "obliged entities referred to in Article 3, points (3)(n) and (o)"
+                ),
+            ),
+        ),
     ),
     ApplicationDate(
         instrument=DORA,
@@ -774,7 +839,11 @@ class Registry:
         ]
         candidates += [d.locus for d in self._application_dates]
         for provision in candidates:
-            key = f"{provision.corpus_key}|{provision.id}"
+            # Dedup on the whole frozen provision, not on corpus_key|id. Keying on the
+            # citation alone silently dropped a second provision carrying the SAME
+            # citation with a DIFFERENT obligation_text, so a fabricated quotation
+            # could enter the registry and never reach the substring check.
+            key = repr(provision)
             if key not in seen:
                 seen.add(key)
                 yield provision
