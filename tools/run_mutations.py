@@ -17,6 +17,7 @@ from pathlib import Path
 
 AGENT = "finagent_safeguard/core/agent.py"
 DECOR = "finagent_safeguard/core/decorators.py"
+REGIS = "finagent_safeguard/regulation/registry.py"
 
 # id: (file, find, replace, expected killer, note)
 MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
@@ -64,6 +65,15 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "(none expected)",
         "bind enforcement to the class, making it overridable",
     ),
+    "R13": (
+        REGIS,
+        '    paragraph="3",\n    subdivision_id="art_5",',
+        '    paragraph="2",\n    subdivision_id="art_5",',
+        "(none expected)",
+        "F-011: cite the wrong paragraph of a multi-occurrence article. TFR Art. 5(3) "
+        "becomes 5(2); 'EUR 1 000' appears in both, so the provenance check cannot "
+        "tell them apart",
+    ),
     "D6": (
         DECOR,
         "    return TOOL_REGISTRY.get(registry_key(func))",
@@ -88,6 +98,7 @@ BASELINE: dict[str, str] = {
     "A4": "caught",
     "A5": "not_caught",
     "D6": "caught",
+    "R13": "not_caught",
 }
 
 
