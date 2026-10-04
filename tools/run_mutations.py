@@ -77,6 +77,20 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
 }
 
 
+# Expected status per mutation id. A mutation moving from "caught" to "not_caught" is a
+# regression and fails CI. Moving the other way is a fix, and requires updating this map by
+# hand in the same commit -- the same deliberate friction as the corpus golden constants.
+BASELINE: dict[str, str] = {
+    "A1": "not_caught",
+    "A2": "caught",
+    "A3": "caught",
+    "A3b": "not_caught",
+    "A4": "caught",
+    "A5": "not_caught",
+    "D6": "caught",
+}
+
+
 def run_suite() -> list[str]:
     out = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/", "-q", "--no-header", "-x", "--tb=no"],
@@ -119,6 +133,45 @@ def main(ids: list[str]) -> int:
     return 1 if missed else 0
 
 
+def check() -> int:
+    """CI mode: every baselined mutation must match its expected status."""
+    # Snapshot dirtiness up front: a tree that was already dirty is not evidence
+    # that a mutation leaked. Only a *change* in dirtiness is.
+    was_dirty = subprocess.run(["git", "diff", "--quiet"]).returncode != 0
+    drift = []
+    for mid, expected in BASELINE.items():
+        path_s, find, repl, _exp, note = MUTATIONS[mid]
+        path = Path(path_s)
+        original = path.read_text()
+        if find not in original:
+            drift.append(f"{mid}: anchor missing (code moved) - baseline is stale")
+            continue
+        path.write_text(original.replace(find, repl, 1))
+        try:
+            actual = "caught" if run_suite() else "not_caught"
+        finally:
+            path.write_text(original)
+        mark = "ok" if actual == expected else "DRIFT"
+        print(f"  {mid:<5} expected={expected:<11} actual={actual:<11} {mark}  {note}")
+        if actual != expected:
+            drift.append(f"{mid}: expected {expected}, got {actual}")
+
+    now_dirty = subprocess.run(["git", "diff", "--quiet"]).returncode != 0
+    if now_dirty and not was_dirty:
+        print("tree DIRTY after mutation run - a mutation leaked, revert by hand")
+        return 1
+    if drift:
+        print("\nmutation baseline drift:")
+        for d in drift:
+            print(f"  - {d}")
+        print("\nIf a mutation is now caught, that is a fix: update BASELINE in this file.")
+        return 1
+    print(f"\n{len(BASELINE)} mutations match baseline")
+    return 0
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
+    if args == ["--check"]:
+        raise SystemExit(check())
     raise SystemExit(main(sorted(MUTATIONS) if args == ["--all"] else args))

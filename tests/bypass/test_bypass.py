@@ -103,7 +103,10 @@ class TestFailClosed:
         def _boom(*_args: object, **_kwargs: object) -> None:
             raise RuntimeError(f"{failing_symbol} exploded")
 
-        if hasattr(agent_module, failing_symbol):
-            monkeypatch.setattr(agent_module, failing_symbol, _boom)
-            with pytest.raises(RuntimeError):
-                BaseCompliantAgent(agent_name="faulty", tools=[_unclassified()])
+        assert hasattr(agent_module, failing_symbol), (
+            f"{failing_symbol} is no longer a module global; this attack is disarmed. "
+            "A guard that turns a missing target into a pass is worse than no test."
+        )
+        monkeypatch.setattr(agent_module, failing_symbol, _boom)
+        with pytest.raises(RuntimeError):
+            BaseCompliantAgent(agent_name="faulty", tools=[_unclassified()])
