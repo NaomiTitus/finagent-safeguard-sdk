@@ -6,8 +6,14 @@ returns the function untouched -- which keeps signatures, docstrings and
 identity intact, and makes stacking trivially order-independent.
 
 The registry is keyed by ``module:qualname``, never by an attribute on the
-function. That is deliberate: an attribute can be hand-set, and the agent
-gate must not be foolable by ``fn._regulated = True``.
+function, so the gate is not foolable by ``fn._regulated = True``.
+
+That is a convenience, not a security boundary, and an earlier version of this
+docstring presented it as the latter. ``__qualname__`` and ``__module__`` are
+plain writable attributes, so the same spoof works one level down; and because
+registration deliberately does not wrap, nothing ties a registration to the
+code that actually runs. Keying by name resists the naive attribute spoof and
+nothing more. See F-005 in ``docs/review-log.md``.
 """
 
 from __future__ import annotations

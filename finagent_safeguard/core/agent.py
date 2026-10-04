@@ -5,16 +5,30 @@ agent around any tool that has not been classified. In shift-left scope this is
 the entire enforcement surface -- there is no runtime interception behind it --
 so it fails closed at construction or it does nothing at all.
 
-Two design choices exist specifically to resist being routed around, and each
-has a test in ``tests/bypass/`` holding it in place:
+Two design choices shape this module. It matters to be precise about what each
+does and does not achieve, because an earlier version of this docstring
+overstated both.
 
-1. **Enforcement is a module-level function**, called from ``__init__``. It is
-   not a method, so a subclass has nothing to override. ``BaseCompliantAgent``
-   deliberately exposes no attribute whose name a developer would reach for
-   when trying to neuter the check.
+1. **Enforcement is a module-level function**, called from ``__init__``. No
+   method on the class performs the check, so there is no named validation hook
+   to override, and ``BaseCompliantAgent`` exposes no public attributes.
+
+   This does **not** make the gate unbypassable. The earlier claim that "a
+   subclass has nothing to override" was false: ``__init__`` is itself the hook.
+   A subclass defining ``__init__`` and never calling ``super().__init__``
+   constructs an agent with no check at all, and so do ``object.__new__`` plus
+   attribute assignment, ``pickle``, and ``copy.copy``. There is no
+   ``__init_subclass__`` or ``__new__`` guard here yet. See F-004 in
+   ``docs/review-log.md``.
+
 2. **Classification is read from the registry**, keyed by ``module:qualname``,
    never from an attribute on the function object. Setting
-   ``fn._regulated = True`` by hand proves nothing and buys nothing.
+   ``fn._regulated = True`` by hand buys nothing.
+
+   The limit is worth stating plainly: ``__qualname__`` and ``__module__`` are
+   themselves writable, and the decorator deliberately does not wrap, so a
+   registration is tied to a *name* rather than to the code that executes.
+   Classifying a stub and rebinding the name defeats this. See F-005.
 """
 
 from __future__ import annotations

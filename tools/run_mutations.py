@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Apply curated mutations one at a time and report which test kills each.
+
+    python3 tools/run_mutations.py A1 A2 A3 A4 A5 D6
+    python3 tools/run_mutations.py --all
+
+A mutation nothing kills is a defect in the test suite, not in the code. Every
+mutation is reverted before the next runs; the tree is verified clean at exit.
+Rows correspond to docs/mutation-list.md.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+AGENT = "finagent_safeguard/core/agent.py"
+DECOR = "finagent_safeguard/core/decorators.py"
+
+# id: (file, find, replace, expected killer, note)
+MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
+    "A1": (
+        AGENT,
+        "            unclassified.append(registry_key(tool))",
+        "            if not unclassified:\n                unclassified.append(registry_key(tool))",
+        "test_partial_registration_still_fails",
+        "report only the first unclassified tool",
+    ),
+    "A2": (
+        AGENT,
+        "class UnregulatedToolError(Exception):",
+        "class UnregulatedToolError(ImportError):",
+        "test_error_is_not_import_error",
+        "borrow ImportError's meaning",
+    ),
+    "A3": (
+        AGENT,
+        '        "    @regulated_tool(FinancialCategory.PSD2_PAYMENT_EXECUTION)\\n"',
+        '        ""',
+        "test_error_names_the_remedy",
+        "remove the worked decorator example from the error message",
+    ),
+    "A3b": (
+        AGENT,
+        '        "Classify each one before constructing the agent:\\n\\n"',
+        '        ""',
+        "(none expected)",
+        "remove only the lead-in sentence, leaving the example",
+    ),
+    "A4": (
+        AGENT,
+        "        registration = lookup(tool)",
+        "        try:\n            registration = lookup(tool)\n"
+        "        except Exception:\n            continue",
+        "test_fails_closed_when_registry_unavailable",
+        "swallow lookup failures and treat the tool as classified",
+    ),
+    "A5": (
+        AGENT,
+        "        self.categories: frozenset[FinancialCategory] = _require_classification(self.tools)",
+        "        self.categories: frozenset[FinancialCategory] = self._require_classification(self.tools)\n"
+        "\n    _require_classification = staticmethod(_require_classification)",
+        "(none expected)",
+        "bind enforcement to the class, making it overridable",
+    ),
+    "D6": (
+        DECOR,
+        "    return TOOL_REGISTRY.get(registry_key(func))",
+        "    hit = TOOL_REGISTRY.get(registry_key(func))\n"
+        "    if hit is None and getattr(func, '_regulated', False):\n"
+        "        return RegisteredTool(func.__module__, func.__qualname__, frozenset())\n"
+        "    return hit",
+        "test_attribute_spoofing_does_not_satisfy_the_gate",
+        "honour a hand-set _regulated attribute",
+    ),
+}
+
+
+def run_suite() -> list[str]:
+    out = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/", "-q", "--no-header", "-x", "--tb=no"],
+        capture_output=True,
+        text=True,
+    ).stdout
+    return [ln.split()[1] for ln in out.splitlines() if ln.startswith("FAILED") and len(ln.split()) > 1]
+
+
+def main(ids: list[str]) -> int:
+    results = []
+    for mid in ids:
+        path_s, find, repl, expected, note = MUTATIONS[mid]
+        path = Path(path_s)
+        original = path.read_text()
+        if find not in original:
+            print(f"{mid}: SKIP - anchor not found (code moved?)")
+            continue
+        path.write_text(original.replace(find, repl, 1))
+        try:
+            failures = run_suite()
+        finally:
+            path.write_text(original)
+        caught = bool(failures)
+        results.append((mid, note, expected, failures, caught))
+        print(f"\n{mid}  {note}")
+        print(f"  expected killer : {expected}")
+        if caught:
+            print(f"  RESULT          : {failures[0]} FAILED")
+            print("  VERDICT         : load-bearing")
+        else:
+            print("  RESULT          : all tests still pass")
+            print("  VERDICT         : *** NOT CAUGHT ***")
+
+    dirty = subprocess.run(["git", "diff", "--quiet"]).returncode
+    print(f"\ntree {'DIRTY - revert manually!' if dirty else 'clean, all mutations reverted'}")
+    missed = [m for m, *_, c in results if not c]
+    print(f"{len(results) - len(missed)}/{len(results)} caught"
+          + (f"  |  NOT CAUGHT: {', '.join(missed)}" if missed else ""))
+    return 1 if missed else 0
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    raise SystemExit(main(sorted(MUTATIONS) if args == ["--all"] else args))

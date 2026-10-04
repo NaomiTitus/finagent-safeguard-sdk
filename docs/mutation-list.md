@@ -74,6 +74,14 @@ row here is itself a review finding.
 | A3 | Drop the remedy from the error message | `test_error_names_the_remedy` | unrun |
 | A4 | Swallow lookup exceptions and treat as classified | `test_fails_closed_when_registry_unavailable` | unrun |
 | **A5** | **Bind enforcement to the class as `_require_classification`, then override it in a subclass** | **none — see F-002** | **NOT CAUGHT** |
+| A3b | Remove only the prose lead-in from the error message | none — decided acceptable | NOT CAUGHT (closed) |
+| **A6** | **Subclass overrides `__init__` and never calls `super()`** | **none — see F-004** | **NOT CAUGHT** |
+| **A7** | **`object.__new__(BaseCompliantAgent)` + attribute assignment (also `pickle`, `copy`)** | **none — see F-004** | **NOT CAUGHT** |
+| **A8** | **Classify a stub, then rebind the module name to an unclassified function** | **none — see F-005** | **NOT CAUGHT** |
+| **A9** | **Set `__qualname__` on an unclassified function to one already classified** | **none — see F-005** | **NOT CAUGHT** |
+| **A10** | **Pass a callable object or `functools.partial`** | **none — raises AttributeError, see F-006** | **NOT CAUGHT** |
+| **A11** | **Replace `TOOL_REGISTRY` with a dict whose `get` always answers** | **none — see F-007** | **NOT CAUGHT** |
+| **A12** | **Reassign `agent.tools` after construction** | **none — see F-008** | **NOT CAUGHT** |
 
 ## Planned (no code yet)
 
