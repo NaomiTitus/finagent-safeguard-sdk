@@ -277,12 +277,12 @@ Enums (`FinancialCategory.PSD2_PAYMENT_EXECUTION`, `GDPR_PII_PROCESSING`, `AML_T
 | | |
 |---|---|
 | Model | `claude-opus-5` (or `claude-opus-5-5`, same recommendation at $4/$20 with 0.05x cache reads) |
-| Cost per full refresh | **~$1.20** (~73K input, ~42K output incl. reasoning, rubric cached) |
+| Cost per full refresh | **~$1.20** (20 calls; ~37K input, ~40K output incl. reasoning) |
 | Cadence | **PR-triggered and incremental** (changed provisions only) + a **quarterly** full sweep |
 | Annual | **under $20** |
 | Default CI path | replays recorded cassettes -- **$0**, no API key |
 
-**Not nightly.** A nightly full refresh is ~$445/yr re-verifying 21 provisions that have not moved
+**Not nightly.** A nightly full refresh is ~$430/yr re-verifying 18 pinned spans that have not moved
 since the previous run. PR-triggered catches drift at the moment it is introduced, which is also
 when it is cheapest to fix.
 
@@ -294,10 +294,19 @@ low effort is exactly the one the check exists for (noticing that "shall be allo
 `high`; step to `medium` only if a held-out fixture set containing a deliberately wrong Art. 16
 entry still fails it.
 
-**Cache the rubric.** It is ~2,204 tokens re-sent 21 times -- 63% of all input tokens -- and
-clears Opus 5's 512-token minimum fourfold. One `cache_control` block saves ~14%. Assert
-`cache_read_input_tokens > 0` on the second call, or the win disappears silently on the next
-prompt-assembly edit.
+**Caching the rubric is marginal here -- do it for latency, not for cost.** Recomputed against
+the real shipped rubric (`prompts/entailment_rubric.txt`, 2,825 characters) and the real rendered
+payloads: the rubric is ~917 tokens re-sent 20 times, which is 49% of *input* tokens but input is
+only ~15% of the bill. One `cache_control` block saves ~7%, about 7 cents a refresh, which at the
+recommended cadence is small change. It still clears Opus 5's 512-token minimum, so it works; if
+the rubric is ever trimmed below 512 tokens it will silently stop caching with no error. If you do
+enable it, assert `cache_read_input_tokens > 0` on the second call so the win cannot disappear
+unnoticed on a later prompt-assembly edit.
+
+**Output dominates so completely that input optimisation is noise.** At 20 calls x ~2,000 output
+tokens, output is ~85% of the bill. Changing the chars-per-token assumption from 2.5 to 3.08
+moves the total by five cents. The only assumption that matters is how much the model thinks, and
+that is a judgement call no estimate can settle -- it needs one real run.
 
 **Skip the Batch API.** 50% off both directions, but at the recommended cadence it saves ~$2.44/yr
 and costs an async state machine in CI (submit, poll, results keyed by `custom_id` arriving in any
