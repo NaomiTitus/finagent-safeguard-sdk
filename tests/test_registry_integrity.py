@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from finagent_safeguard.regulation import registry as reg
-from finagent_safeguard.regulation.citation import Status
+from finagent_safeguard.regulation.citation import NOT_YET_DETERMINED, Status
 from finagent_safeguard.regulation.registry import REGISTRY, Provenance
 
 BASE_ACT_CELEX = re.compile(r"^3\d{4}[LRD]\d{4}$")
@@ -99,7 +99,7 @@ class TestQuotation:
             span = corpus[provision.corpus_key]
             assert provision.obligation_text in span.text, provision.id
             checked += 1
-        assert checked >= 10, f"only {checked} quotations checked; test is near-vacuous"
+        assert checked == 14, f"quotation count moved to {checked}; update deliberately"
 
     def test_every_provision_resolves_to_a_pinned_corpus_entry(
         self, corpus: dict[str, Any]
@@ -108,7 +108,7 @@ class TestQuotation:
         for provision in REGISTRY.provisions():
             assert provision.corpus_key in corpus, provision.id
             checked += 1
-        assert checked >= 18, f"only {checked} provisions checked; test is near-vacuous"
+        assert checked == 23, f"provision count moved to {checked}; update deliberately"
 
 
 class TestCitationForm:
@@ -260,13 +260,21 @@ class TestApplicationDateProvenance:
             assert entry.date == entry.instrument.applies_from, entry.instrument.short_name
 
     def test_instruments_without_date_provenance_are_the_documented_set(self) -> None:
-        """An allowlist that must shrink. Adding an instrument without date provenance
-        fails the build rather than quietly joining the gap."""
+        """A two-way lock on the date-provenance gap, not a one-way ratchet.
+
+        Adding an instrument without date provenance fails the build; so does adding
+        provenance for one of these four. Both directions require a deliberate edit
+        here, which is the point.
+
+        Filtered on whether an application date exists to cite at all, not on status:
+        a status-shaped filter would let a non-IN_FORCE instrument join the gap
+        silently, which is exactly what this test exists to prevent.
+        """
         covered = {e.instrument.short_name for e in REGISTRY.application_dates()}
         missing = {
             i.short_name
             for i in REGISTRY.instruments()
-            if i.short_name not in covered and i.status is Status.IN_FORCE
+            if i.short_name not in covered and i.applies_from != NOT_YET_DETERMINED
         }
         assert missing == {"PSD2", "RTS on SCA", "GDPR", "TFR"}, (
             f"date-provenance gap changed: {sorted(missing)}"

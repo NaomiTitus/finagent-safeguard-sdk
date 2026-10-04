@@ -163,6 +163,28 @@ class ApplicationDate:
     #: The date as the Official Journal writes it, e.g. "10 July 2027".
     verbatim_form: str
 
+    def __post_init__(self) -> None:
+        """The quoted form must parse to the declared date.
+
+        Without this, the only machine-checked fact is that *some* string occurs
+        somewhere in the article -- "2025", "January", even "." would pass a
+        substring check, and a contradictory pair (date 2027 quoted as "10 July
+        2029") would pass while ``as_cited`` returned the wrong value.
+        """
+        try:
+            parsed = _dt.datetime.strptime(self.verbatim_form, "%d %B %Y").date()
+        except ValueError as exc:
+            raise ValueError(
+                f"{self.instrument.short_name}: verbatim_form "
+                f"{self.verbatim_form!r} is not a date in Official Journal form "
+                '(e.g. "10 July 2027")'
+            ) from exc
+        if parsed != self.date:
+            raise ValueError(
+                f"{self.instrument.short_name}: verbatim_form "
+                f"{self.verbatim_form!r} parses to {parsed}, but date is {self.date}"
+            )
+
     @property
     def as_cited(self) -> str:
         return self.verbatim_form
@@ -429,12 +451,13 @@ TFR_ART_4_4 = Provision(
         "information referred to in paragraph 1"
     ),
 )
-TFR_ART_5_3 = Provision(
+TFR_ART_5_2_B = Provision(
     instrument=TFR,
     article="5",
-    paragraph="3",
+    paragraph="2",
+    point="b",
     subdivision_id="art_5",
-    tags=("derogation_from_verification", "not_a_reporting_threshold"),
+    tags=("defines_the_bracket", "not_a_reporting_threshold"),
 )
 
 AMLR_ART_90 = Provision(instrument=AMLR, article="90", subdivision_id="art_90")
@@ -669,14 +692,16 @@ REFERENCE_POINTS: tuple[ReferencePoint, ...] = (
             value=Decimal("1000"),
             currency="EUR",
             provenance=Provenance.REGULATORY_VERBATIM,
-            locus=TFR_ART_5_3,
+            locus=TFR_ART_5_2_B,
         ),
         governs=(
-            "Derogation from the Art. 4(4) duty to verify the accuracy of payer "
-            "information, for intra-Union transfers not exceeding this amount and not "
-            "appearing linked to others that together exceed it. Governs VERIFICATION, "
-            "not reporting -- the figure is commonly misdescribed as a reporting "
-            "threshold, and it is not one."
+            "Defines the bracket of intra-Union transfers -- not exceeding this amount, "
+            "and not appearing linked to others that together exceed it -- to which the "
+            "Art. 5(3) derogation from the Art. 4(4) duty to verify payer information "
+            "applies. The figure is cited here at Art. 5(2)(b), where it actually "
+            "appears; Art. 5(3) incorporates it by reference and contains no monetary "
+            "figure of its own. Governs VERIFICATION, not reporting -- it is commonly "
+            "misdescribed as a reporting threshold and is not one."
         ),
     ),
 )
