@@ -83,7 +83,8 @@ trigger, or a written decision — never to "noted".
 - **F-008 — no post-construction invariant. MEDIUM.** `agent.tools` is reassignable with no
   re-validation, and is assigned *before* validation runs. → becomes: test + frozen state
 - **F-001 — empty-iterator vacuity in two registry quotation tests. MEDIUM.** (Day 1 scope,
-  carried.) → becomes: test (minimum-count assertion)
+  carried.) → **RESOLVED** in `fix/registry-vacuity`: minimum-count guards added; mutation R12
+  now killed by 4 tests. Bundled with the orphan gap and application-date provenance.
 - **A1 — only the first unclassified tool is named. LOW.** → becomes: test (two offenders)
 - **F-009 — the `dir()` substring test checks a naming convention. LOW.** Brittle in both
   directions. → becomes: subsumed by the F-002 fix

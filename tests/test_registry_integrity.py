@@ -92,17 +92,23 @@ class TestQuotation:
         PLAN.md section 3: a test whose docstring paraphrases is not done.
         The same rule applies to the registry's own obligation_text.
         """
+        checked = 0
         for provision in REGISTRY.provisions():
             if not provision.obligation_text:
                 continue
             span = corpus[provision.corpus_key]
             assert provision.obligation_text in span.text, provision.id
+            checked += 1
+        assert checked >= 10, f"only {checked} quotations checked; test is near-vacuous"
 
     def test_every_provision_resolves_to_a_pinned_corpus_entry(
         self, corpus: dict[str, Any]
     ) -> None:
+        checked = 0
         for provision in REGISTRY.provisions():
             assert provision.corpus_key in corpus, provision.id
+            checked += 1
+        assert checked >= 18, f"only {checked} provisions checked; test is near-vacuous"
 
 
 class TestCitationForm:
@@ -210,3 +216,58 @@ class TestReferencePoints:
         figure goes so that nobody has to invent one."""
         for point in REGISTRY.reference_points():
             assert point.operative is False, point.parameter.name
+
+
+class TestNoOrphans:
+    """Both directions. A pinned span nothing cites, or a declared provision nothing
+    reaches, is dead weight that looks like coverage."""
+
+    def test_no_pinned_span_is_uncited(self, corpus: dict[str, Any]) -> None:
+        cited = {p.corpus_key for p in REGISTRY.provisions()}
+        uncited = sorted(set(corpus) - cited)
+        assert not uncited, f"pinned but cited by nothing: {uncited}"
+
+    def test_every_declared_provision_is_reachable(self) -> None:
+        from finagent_safeguard.regulation.citation import Provision
+
+        declared = {
+            f"{v.corpus_key}|{v.id}"
+            for v in vars(reg).values()
+            if isinstance(v, Provision)
+        }
+        reachable = {f"{p.corpus_key}|{p.id}" for p in REGISTRY.provisions()}
+        orphans = sorted(declared - reachable)
+        assert not orphans, f"declared but unreachable from the registry: {orphans}"
+
+
+class TestApplicationDateProvenance:
+    """Every number in this registry names its source. Dates were exempt, and dates are
+    the class of fact that was wrong in the AI Act case."""
+
+    def test_declared_application_dates_appear_in_their_pinned_span(
+        self, corpus: dict[str, Any]
+    ) -> None:
+        assert REGISTRY.application_dates(), "no application date carries provenance"
+        for entry in REGISTRY.application_dates():
+            span = corpus[entry.locus.corpus_key]
+            assert entry.as_cited in span.text, (
+                f"{entry.instrument.short_name}: {entry.as_cited!r} absent from "
+                f"{entry.locus.id}"
+            )
+
+    def test_declared_date_matches_the_instrument(self) -> None:
+        for entry in REGISTRY.application_dates():
+            assert entry.date == entry.instrument.applies_from, entry.instrument.short_name
+
+    def test_instruments_without_date_provenance_are_the_documented_set(self) -> None:
+        """An allowlist that must shrink. Adding an instrument without date provenance
+        fails the build rather than quietly joining the gap."""
+        covered = {e.instrument.short_name for e in REGISTRY.application_dates()}
+        missing = {
+            i.short_name
+            for i in REGISTRY.instruments()
+            if i.short_name not in covered and i.status is Status.IN_FORCE
+        }
+        assert missing == {"PSD2", "RTS on SCA", "GDPR", "TFR"}, (
+            f"date-provenance gap changed: {sorted(missing)}"
+        )
