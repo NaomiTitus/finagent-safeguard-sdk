@@ -98,7 +98,10 @@ BASELINE: dict[str, str] = {
     "A4": "caught",
     "A5": "not_caught",
     "D6": "caught",
-    "R13": "not_caught",
+    # F-011 narrowed: citation structure is now validated against the span,
+    # so fabricating Art. 5(9)(z) is caught. Hand-updated, which is the
+    # intended friction -- a mutation becoming caught is a fix worth noticing.
+    "R13": "caught",
 }
 
 
@@ -149,7 +152,24 @@ def check() -> int:
     # Snapshot dirtiness up front: a tree that was already dirty is not evidence
     # that a mutation leaked. Only a *change* in dirtiness is.
     was_dirty = subprocess.run(["git", "diff", "--quiet"]).returncode != 0
+    _was_dirty_at_start = {
+        path_s: subprocess.run(["git", "diff", "--quiet", "--", path_s]).returncode != 0
+        for path_s, *_rest in MUTATIONS.values()
+    }
     drift = []
+
+    # Iterating BASELINE alone meant a mutation added to MUTATIONS without a
+    # baseline entry was never executed, while the summary still reported
+    # "N mutations match baseline". Pin both directions.
+    unbaselined = sorted(set(MUTATIONS) - set(BASELINE))
+    unknown = sorted(set(BASELINE) - set(MUTATIONS))
+    if unbaselined or unknown:
+        print("baseline does not cover the mutation set:")
+        for mid in unbaselined:
+            print(f"  - {mid} has no baseline entry, so it is never run")
+        for mid in unknown:
+            print(f"  - {mid} is baselined but no longer defined")
+        return 1
     for mid, expected in BASELINE.items():
         path_s, find, repl, _exp, note = MUTATIONS[mid]
         path = Path(path_s)
@@ -167,10 +187,21 @@ def check() -> int:
         if actual != expected:
             drift.append(f"{mid}: expected {expected}, got {actual}")
 
-    now_dirty = subprocess.run(["git", "diff", "--quiet"]).returncode != 0
-    if now_dirty and not was_dirty:
-        print("tree DIRTY after mutation run - a mutation leaked, revert by hand")
+    # Comparing whole-tree dirtiness disabled the alarm on any dirty tree, which
+    # is the normal state while developing. Compare only the files mutations
+    # touch, so a leak is caught regardless of unrelated edits.
+    touched = {Path(MUTATIONS[mid][0]) for mid in BASELINE}
+    leaked = [
+        str(p)
+        for p in touched
+        if subprocess.run(["git", "diff", "--quiet", "--", str(p)]).returncode
+        and not _was_dirty_at_start.get(str(p), False)
+    ]
+    if leaked:
+        print(f"mutation leaked into {leaked} - revert by hand")
         return 1
+    if was_dirty:
+        print("note: tree had unrelated uncommitted changes before this run")
     if drift:
         print("\nmutation baseline drift:")
         for d in drift:
