@@ -119,3 +119,18 @@ test fixes.
 
 - The 29 remaining mutations in `docs/mutation-list.md` covering ingest, citation and
   registry. They are the worklist for sessions two and three.
+
+---
+
+## 2026-10-04 — `fix/registry-vacuity` — self-inflicted, caught by the new meta-suite
+
+- **F-010 — a PR was pushed whose tests could not pass.** The branch carried the tests
+  for PR 3 without the registry implementation they exercise: 9 failures, and a PR body
+  claiming 85 passing. The claim was measured before the loss and written after it.
+  **Cause:** `git checkout -- registry.py`, used to revert a mutation experiment by hand,
+  discarded uncommitted work. `tools/run_mutations.py` applies and reverts safely and
+  verifies the tree afterwards; the mistake was reverting outside it.
+  **Lesson:** never hand-revert a file with uncommitted work in it. Prefer committing
+  before mutating, and let the runner do the reverting.
+  → RESOLVED by restoring the implementation; prevention is the CI gate, which would have
+  caught this on push rather than two steps later.
