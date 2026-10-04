@@ -104,3 +104,56 @@ class TestNameMatchesAssertion:
         assert not offenders, (
             "conditional guards that can silently pass: " + ", ".join(offenders)
         )
+
+
+class TestReviewPacketsAreSelfServe:
+    """The review process must not depend on the author's choices.
+
+    Two levers were removed: which materials a cold reviewer sees, and what
+    criterion it judges against. These tests keep them removed.
+    """
+
+    def test_every_criterion_is_substantive(self) -> None:
+        import tomllib
+
+        path = Path(__file__).resolve().parents[1] / "docs" / "review-criteria.toml"
+        with path.open("rb") as fh:
+            criteria = tomllib.load(fh)["criteria"]
+        assert criteria, "no committed criteria"
+        for branch, text in criteria.items():
+            assert len(text.split()) >= 12, (
+                f"{branch}: a criterion of {len(text.split())} words is a label, "
+                "not a test of the work"
+            )
+
+    def test_a_branch_without_a_criterion_cannot_be_reviewed(self) -> None:
+        """An author who writes the criterion at review time decides what
+        passing means."""
+        import importlib.util
+
+        root = Path(__file__).resolve().parents[1]
+        spec = importlib.util.spec_from_file_location(
+            "prep", root / "tools" / "prepare_review.py"
+        )
+        assert spec and spec.loader
+        prep = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(prep)
+        with pytest.raises(SystemExit, match="No committed criterion"):
+            prep.criterion_for("some/branch-nobody-wrote-a-criterion-for")
+
+    def test_the_packet_cannot_carry_the_author_s_reasoning(self) -> None:
+        """docs/ holds the plan, the drafts and every prior review. A cold
+        reviewer that reads them inherits the framing it exists to do without."""
+        import importlib.util
+
+        root = Path(__file__).resolve().parents[1]
+        spec = importlib.util.spec_from_file_location(
+            "prep", root / "tools" / "prepare_review.py"
+        )
+        assert spec and spec.loader
+        prep = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(prep)
+        assert not any(p.startswith("docs") for p in prep.CODE_PATHS)
+        assert any("docs" in rule for rule in prep.EXCLUSIONS), (
+            "the exclusion must be stated in the manifest, not merely implied"
+        )
