@@ -67,12 +67,12 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
     ),
     "R13": (
         REGIS,
-        '    paragraph="3",\n    subdivision_id="art_5",',
-        '    paragraph="2",\n    subdivision_id="art_5",',
+        '    paragraph="2",\n    point="b",',
+        '    paragraph="9",\n    point="z",',
         "(none expected)",
-        "F-011: cite the wrong paragraph of a multi-occurrence article. TFR Art. 5(3) "
-        "becomes 5(2); 'EUR 1 000' appears in both, so the provenance check cannot "
-        "tell them apart",
+        "F-011: cite a paragraph that does not exist. TFR Art. 5(2)(b) becomes 5(9)(z); "
+        "the span is article-level so the provenance check cannot tell, and the "
+        "paragraph field is never validated against anything",
     ),
     "D6": (
         DECOR,
