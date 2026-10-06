@@ -375,3 +375,16 @@ class TestPartialFindings:
         with pytest.raises(linter.StaleFindings):
             linter.apply_fix(p, findings)
         assert "audit()" in p.read_text()
+
+    def test_a_finding_from_another_file_is_rejected(self, tmp_path: Path) -> None:
+        """The digest check catches a changed file; this catches a finding that
+        was never about this file at all -- a caller mixing up two scans."""
+        import dataclasses
+
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        real = linter.scan_file(p)[0]
+        impostor = dataclasses.replace(real, function="not_in_this_file", insert_line=99)
+        with pytest.raises(linter.StaleFindings, match="not findings for this file"):
+            linter.apply_fix(p, [impostor])
+        assert p.read_text() == SIMPLE

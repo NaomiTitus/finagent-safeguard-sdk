@@ -84,8 +84,10 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         LINT,
         '    if any(_matches_tokens(name, NAME_TOKENS) for name in names):\n        return "name"',
         '    if False:\n        return "name"',
-        "test_flags_by_parameter_name",
-        "disable the name-token signal",
+        "test_reports_the_def_line",
+        "disable the name-token signal. NOTE: the obvious killer, "
+        "test_flags_by_parameter_name, does NOT fail -- its fixture also carries "
+        "a Decimal annotation, so the type signal covers for it",
     ),
     "L2": (
         LINT,
@@ -117,10 +119,10 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
     ),
     "L6": (
         LINT,
-        '    if fresh != [(f.function, f.insert_line) for f in findings]:',
-        '    if False:',
-        "test_aborts_if_the_file_changed_since_it_was_read",
-        "skip the TOCTOU check",
+        '    unknown = [f.function for f in findings if (f.function, f.insert_line) not in known]',
+        '    unknown = []',
+        "test_a_subset_of_findings_may_be_applied",
+        "stop checking that findings belong to this file at all",
     ),
     "L7": (
         LINT,
@@ -164,8 +166,10 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         LINT,
         '        tmp.replace(path)',
         '        path.write_bytes(modified.encode())',
-        "test_leaves_no_temporary_file_behind",
-        "write in place instead of atomic temp-and-rename",
+        "test_the_write_is_atomic_not_in_place",
+        "write in place instead of atomic temp-and-rename. NOTE: "
+        "test_leaves_no_temporary_file_behind does NOT catch this -- the rename "
+        "consumes the temp on the success path either way",
     ),
     "L13": (
         LINT,
@@ -173,6 +177,44 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         '        return raw.decode("utf-8")',
         "test_a_bom_prefixed_file_scans_normally",
         "stop stripping the byte-order mark, hard-failing a legal file",
+    ),
+    # Second review. The category written into a developer's source, the
+    # overload hazard and the import decision had no rows at all, which is
+    # why those defects shipped.
+    "L14": (
+        LINT,
+        '    needed = _missing_imports(text)',
+        '    needed = [i for i in (DECORATOR_IMPORT, CATEGORY_IMPORT) if i not in text]',
+        "test_a_docstring_mentioning_the_import_does_not_suppress_it",
+        "decide imports by substring, so a docstring example suppresses them",
+    ),
+    "L15": (
+        LINT,
+        '    return any(_decorator_name(d) == "overload" for d in node.decorator_list)',
+        '    return False',
+        "test_an_overload_stub_is_not_flagged",
+        "decorate an @overload stub, which is discarded at runtime",
+    ),
+    "L16": (
+        LINT,
+        '    if any(_matches_tokens(n, PII_TOKENS) for n in names):\n        return "GDPR_PII_PROCESSING"',
+        '    if False:\n        return "GDPR_PII_PROCESSING"',
+        "test_personal_data_gets_the_gdpr_category",
+        "write a payments category onto personal-data functions",
+    ),
+    "L17": (
+        LINT,
+        '    stale = [f.function for f in findings if f.source_sha != digest]',
+        '    stale = []',
+        "test_a_content_change_is_detected_even_when_lines_are_unchanged",
+        "drop the content digest, silently overwriting a concurrent save",
+    ),
+    "L18": (
+        LINT,
+        '    return bool(set(dotted.split(".")) & BANK_CLIENT_MARKERS)',
+        '    return dotted.rsplit(".", 1)[-1] in BANK_CLIENT_MARKERS',
+        "test_a_realistic_module_path_is_recognised",
+        "match only the last component of a dotted import path",
     ),
     "D6": (
         DECOR,
@@ -215,6 +257,11 @@ BASELINE: dict[str, str] = {
     "L11": "caught",
     "L12": "caught",
     "L13": "caught",
+    "L14": "caught",
+    "L15": "caught",
+    "L16": "caught",
+    "L17": "caught",
+    "L18": "caught",
 }
 
 
