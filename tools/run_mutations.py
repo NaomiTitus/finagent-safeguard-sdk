@@ -38,14 +38,14 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
     ),
     "A3": (
         AGENT,
-        '        "    @regulated_tool(FinancialCategory.PSD2_PAYMENT_EXECUTION)\\n"',
+        '        "    @regulated_tool(FinancialCategory.PSD2_PAYMENT_EXECUTION)\n"',
         '        ""',
         "test_error_names_the_remedy",
         "remove the worked decorator example from the error message",
     ),
     "A3b": (
         AGENT,
-        '        "Classify each one before constructing the agent:\\n\\n"',
+        '        "Classify each one before constructing the agent:\n\n"',
         '        ""',
         "(none expected)",
         "remove only the lead-in sentence, leaving the example",
@@ -75,60 +75,55 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "the span is article-level so the provenance check cannot tell, and the "
         "paragraph field is never validated against anything",
     ),
-    # Day 3. One row per detection signal: a signal with no killing mutation is
-    # decoration, present and free to rot once it is the thing blocking merges.
+    # Day 3. One row per detection signal and per write-path safeguard: a
+    # signal with no killing mutation is decoration, free to rot once it is
+    # the thing blocking merges.
     "L1": (
         LINT,
-        '    if any(token in name.lower() for name in names for token in NAME_TOKENS):
-        return "name"',
-        '    if False:
-        return "name"',
+        '    if any(token in name.lower() for name in names for token in NAME_TOKENS):\n        return "name"',
+        '    if False:\n        return "name"',
         "test_flags_by_parameter_name",
         "disable the name-token signal",
     ),
     "L2": (
         LINT,
-        "        if _annotation_names(annotation) & RISKY_ANNOTATIONS:
-            return \"type\"",
-        "        if False:
-            return \"type\"",
+        '        if _annotation_names(annotation) & RISKY_ANNOTATIONS:\n            return "type"',
+        '        if False:\n            return "type"',
         "test_flags_by_type_annotation_only",
         "disable the type-annotation signal",
     ),
     "L3": (
         LINT,
-        '    if bank and not node.name.startswith("_"):
-        return "bank_client_import"',
-        '    if False:
-        return "bank_client_import"',
+        '    if bank and not node.name.startswith("_"):\n        return "bank_client_import"',
+        '    if False:\n        return "bank_client_import"',
         "test_flags_public_functions_in_a_module_reaching_the_bank",
         "disable the bank-client import rule",
     ),
     "L4": (
         LINT,
-        "    for finding in sorted(findings, key=lambda f: f.insert_line, reverse=True):",
-        "    for finding in sorted(findings, key=lambda f: f.insert_line):",
+        '    for finding in sorted(findings, key=lambda f: f.insert_line, reverse=True):',
+        '    for finding in sorted(findings, key=lambda f: f.insert_line):',
         "test_multiple_functions_all_land_correctly",
         "apply edits top-down, so earlier inserts shift later line numbers",
     ),
     "L5": (
         LINT,
-        "    if before != after:",
-        "    if False:",
+        '    if before != after:',
+        '    if False:',
         "test_aborts_when_the_reparse_changes_the_function_set",
         "skip the re-parse verification before writing",
     ),
     "L6": (
         LINT,
-        "    if fresh != [(f.function, f.insert_line) for f in findings]:",
-        "    if False:",
+        '    if fresh != [(f.function, f.insert_line) for f in findings]:',
+        '    if False:',
         "test_aborts_if_the_file_changed_since_it_was_read",
         "skip the TOCTOU check",
     ),
     "L7": (
         LINT,
         '        raise UnparseableSource(f"{path}: {exc}") from exc',
-        "        return []",
+        '        return []',
         "test_a_file_that_does_not_parse_is_reported_not_skipped",
         "silently skip an unparseable file -- a clean run that means nothing",
     ),
