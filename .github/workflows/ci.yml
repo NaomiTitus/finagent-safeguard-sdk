@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # Without this the staleness job below is gated on an event that never
+  # arrives, so the one check meant to fire with no human fires never.
+  schedule:
+    - cron: "17 6 * * 1"
+
+# Successive pushes to one PR cancel the previous run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Everything here runs with no credentials, by design.
+  # tests/test_meta_suite.py::TestWorkflowIsCredentialFree parses this file and
+  # asserts the job references no secrets. The assertion is real; an earlier
+  # version of this comment claimed a test that did not exist.
+  fast:
+    name: tests, types, meta-suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - name: Test suite (includes vacuity and name-assertion guards)
+        run: python -m pytest tests/ -q
+      - name: Type check
+        run: python -m mypy --strict finagent_safeguard/
+
+  # Layer 1a of the review protocol, enforced. Each curated mutation must match its
+  # recorded status; a mutation drifting from caught to not-caught fails the build.
+  mutation:
+    name: mutation baseline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - name: Mutation baseline
+        run: python3 tools/run_mutations.py --check
+
+  # Drift alarm. Goes red with no code change when a regulatory review date passes.
+  staleness:
+    name: regulatory review dates
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - run: python -m pytest tests/ -q -k no_instrument_review_is_overdue

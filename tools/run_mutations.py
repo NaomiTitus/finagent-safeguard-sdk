@@ -17,6 +17,7 @@ from pathlib import Path
 
 AGENT = "finagent_safeguard/core/agent.py"
 DECOR = "finagent_safeguard/core/decorators.py"
+REGIS = "finagent_safeguard/regulation/registry.py"
 
 # id: (file, find, replace, expected killer, note)
 MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
@@ -64,6 +65,15 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "(none expected)",
         "bind enforcement to the class, making it overridable",
     ),
+    "R13": (
+        REGIS,
+        '    paragraph="2",\n    point="b",',
+        '    paragraph="9",\n    point="z",',
+        "(none expected)",
+        "F-011: cite a paragraph that does not exist. TFR Art. 5(2)(b) becomes 5(9)(z); "
+        "the span is article-level so the provenance check cannot tell, and the "
+        "paragraph field is never validated against anything",
+    ),
     "D6": (
         DECOR,
         "    return TOOL_REGISTRY.get(registry_key(func))",
@@ -74,6 +84,24 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "test_attribute_spoofing_does_not_satisfy_the_gate",
         "honour a hand-set _regulated attribute",
     ),
+}
+
+
+# Expected status per mutation id. A mutation moving from "caught" to "not_caught" is a
+# regression and fails CI. Moving the other way is a fix, and requires updating this map by
+# hand in the same commit -- the same deliberate friction as the corpus golden constants.
+BASELINE: dict[str, str] = {
+    "A1": "not_caught",
+    "A2": "caught",
+    "A3": "caught",
+    "A3b": "not_caught",
+    "A4": "caught",
+    "A5": "not_caught",
+    "D6": "caught",
+    # F-011 narrowed: citation structure is now validated against the span,
+    # so fabricating Art. 5(9)(z) is caught. Hand-updated, which is the
+    # intended friction -- a mutation becoming caught is a fix worth noticing.
+    "R13": "caught",
 }
 
 
@@ -119,6 +147,73 @@ def main(ids: list[str]) -> int:
     return 1 if missed else 0
 
 
+def check() -> int:
+    """CI mode: every baselined mutation must match its expected status."""
+    # Snapshot dirtiness up front: a tree that was already dirty is not evidence
+    # that a mutation leaked. Only a *change* in dirtiness is.
+    was_dirty = subprocess.run(["git", "diff", "--quiet"]).returncode != 0
+    _was_dirty_at_start = {
+        path_s: subprocess.run(["git", "diff", "--quiet", "--", path_s]).returncode != 0
+        for path_s, *_rest in MUTATIONS.values()
+    }
+    drift = []
+
+    # Iterating BASELINE alone meant a mutation added to MUTATIONS without a
+    # baseline entry was never executed, while the summary still reported
+    # "N mutations match baseline". Pin both directions.
+    unbaselined = sorted(set(MUTATIONS) - set(BASELINE))
+    unknown = sorted(set(BASELINE) - set(MUTATIONS))
+    if unbaselined or unknown:
+        print("baseline does not cover the mutation set:")
+        for mid in unbaselined:
+            print(f"  - {mid} has no baseline entry, so it is never run")
+        for mid in unknown:
+            print(f"  - {mid} is baselined but no longer defined")
+        return 1
+    for mid, expected in BASELINE.items():
+        path_s, find, repl, _exp, note = MUTATIONS[mid]
+        path = Path(path_s)
+        original = path.read_text()
+        if find not in original:
+            drift.append(f"{mid}: anchor missing (code moved) - baseline is stale")
+            continue
+        path.write_text(original.replace(find, repl, 1))
+        try:
+            actual = "caught" if run_suite() else "not_caught"
+        finally:
+            path.write_text(original)
+        mark = "ok" if actual == expected else "DRIFT"
+        print(f"  {mid:<5} expected={expected:<11} actual={actual:<11} {mark}  {note}")
+        if actual != expected:
+            drift.append(f"{mid}: expected {expected}, got {actual}")
+
+    # Comparing whole-tree dirtiness disabled the alarm on any dirty tree, which
+    # is the normal state while developing. Compare only the files mutations
+    # touch, so a leak is caught regardless of unrelated edits.
+    touched = {Path(MUTATIONS[mid][0]) for mid in BASELINE}
+    leaked = [
+        str(p)
+        for p in touched
+        if subprocess.run(["git", "diff", "--quiet", "--", str(p)]).returncode
+        and not _was_dirty_at_start.get(str(p), False)
+    ]
+    if leaked:
+        print(f"mutation leaked into {leaked} - revert by hand")
+        return 1
+    if was_dirty:
+        print("note: tree had unrelated uncommitted changes before this run")
+    if drift:
+        print("\nmutation baseline drift:")
+        for d in drift:
+            print(f"  - {d}")
+        print("\nIf a mutation is now caught, that is a fix: update BASELINE in this file.")
+        return 1
+    print(f"\n{len(BASELINE)} mutations match baseline")
+    return 0
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
+    if args == ["--check"]:
+        raise SystemExit(check())
     raise SystemExit(main(sorted(MUTATIONS) if args == ["--all"] else args))

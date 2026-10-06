@@ -52,6 +52,7 @@ row here is itself a review finding.
 | R9 | Add a second `SdkRole` member and use it | `test_sdk_role_is_contributes_only` | unrun |
 | R10 | `ReferencePoint.governs` becomes `""` | `test_reference_point_requires_governs` | unrun |
 | R11 | Point both EUR 10 000 reference points at the same article | `test_the_two_amlr_ten_thousands_are_distinct_entries` | unrun |
+| R13 | Cite a paragraph or point that does not exist (Art. 5(9)(z)) | `test_every_cited_paragraph_exists_in_the_span` | caught |
 | R12 | `provisions()` returns an empty iterator | 4 tests incl. both quotation tests | caught |
 
 ## `core/decorators.py`

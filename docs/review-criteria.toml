@@ -1,0 +1,28 @@
+# Exit criteria, committed.
+#
+# The review tool reads criteria from this file, keyed by branch. They are NOT
+# written fresh at review time. The reason is specific: whoever writes the
+# criterion at review time controls what "passing" means, and an author who
+# writes their own criterion minutes before the review can write a soft one
+# without noticing they have done it.
+#
+# A branch with no entry here cannot be reviewed. That is deliberate: the
+# criterion must exist before the work does, or it is a description of what was
+# built rather than a test of it.
+
+[criteria]
+
+"fix/registry-vacuity" = """
+Registry meta-tests must be capable of failing, and no provision or pinned span \
+may be orphaned."""
+
+"ci/enforce-review-layers" = """
+Three review techniques - mutation testing, vacuity detection, and \
+name-assertion matching - must be enforced by the test suite and by CI rather \
+than depending on someone remembering to run them; and a merge must be blocked \
+when they fail."""
+
+"review/self-serve-packets" = """
+A review packet must be assembled by tooling from a git ref, not by the author, \
+and must state what it excluded and why; and the criterion a review judges \
+against must come from this committed file, not from the reviewer's prompt."""

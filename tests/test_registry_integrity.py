@@ -230,13 +230,13 @@ class TestNoOrphans:
     def test_every_declared_provision_is_reachable(self) -> None:
         from finagent_safeguard.regulation.citation import Provision
 
-        # repr(), matching provisions(). Keying on corpus_key|id collapses
-        # field-distinct provisions onto one citation, so an orphan carrying a
-        # fabricated obligation_text is invisible -- the same mistake this PR
-        # fixes in provisions() three lines of code away.
-        declared = {repr(v) for v in vars(reg).values() if isinstance(v, Provision)}
-        reachable = {repr(p) for p in REGISTRY.provisions()}
-        orphans = sorted(declared - reachable)
+        # The provisions themselves, matching provisions(). Provision is frozen
+        # and hashable, so this is exact rather than a repr() proxy -- a proxy
+        # would collapse under one field(repr=False) and blind this test at the
+        # same moment it reinstated the bug it guards.
+        declared = {v for v in vars(reg).values() if isinstance(v, Provision)}
+        reachable = set(REGISTRY.provisions())
+        orphans = sorted(p.id for p in declared - reachable)
         assert not orphans, f"declared but unreachable from the registry: {orphans}"
 
 
@@ -271,10 +271,23 @@ class TestApplicationDateProvenance:
         silently, which is exactly what this test exists to prevent.
         """
         covered = {e.instrument.short_name for e in REGISTRY.application_dates()}
+        # Every instrument is accounted for in exactly one of three sets. An
+        # earlier version filtered out NOT_YET_DETERMINED, which is the same hole
+        # its own docstring claimed to avoid: an instrument could be exempted from
+        # the regime by declaring a sentinel date, silently.
+        undetermined = {
+            i.short_name
+            for i in REGISTRY.instruments()
+            if i.applies_from == NOT_YET_DETERMINED
+        }
+        assert undetermined == {"PSR (draft)"}, (
+            f"instruments with no determined application date changed: "
+            f"{sorted(undetermined)}"
+        )
         missing = {
             i.short_name
             for i in REGISTRY.instruments()
-            if i.short_name not in covered and i.applies_from != NOT_YET_DETERMINED
+            if i.short_name not in covered and i.short_name not in undetermined
         }
         assert missing == {"PSD2", "RTS on SCA", "GDPR", "TFR"}, (
             f"date-provenance gap changed: {sorted(missing)}"
@@ -361,3 +374,47 @@ class TestStagedApplicationDates:
                 locus=reg.DORA_ART_64,
                 verbatim_form="17 January 2025",
             )
+
+
+class TestCitationStructure:
+    """A paragraph or point must actually exist in the article it cites.
+
+    Pinning is article-level, so a substring check on a numeral silently widens
+    to the whole article and no paragraph or point value was ever validated
+    against anything. Mutation R13 demonstrated it: rewriting a citation to
+    Art. 5(9)(z) -- a provision that does not exist, and whose absence the pinned
+    span proves -- killed no test.
+
+    This does not close F-011 entirely. It establishes that the subdivision
+    exists, not that the claim belongs to it; distinguishing Art. 5(2) from
+    Art. 5(3) still needs reasoning over the quote.
+    """
+
+    def test_every_cited_paragraph_exists_in_the_span(
+        self, corpus: dict[str, Any]
+    ) -> None:
+        checked = 0
+        for provision in REGISTRY.provisions():
+            if not provision.paragraph:
+                continue
+            text = corpus[provision.corpus_key].text
+            marker = re.compile(rf"(?:^|\s){re.escape(provision.paragraph)}\.\s")
+            assert marker.search(text), (
+                f"{provision.id} cites paragraph {provision.paragraph}, but "
+                f"{provision.subdivision_id} states no such paragraph"
+            )
+            checked += 1
+        assert checked == 12, f"paragraph citations moved to {checked}"
+
+    def test_every_cited_point_exists_in_the_span(self, corpus: dict[str, Any]) -> None:
+        checked = 0
+        for provision in REGISTRY.provisions():
+            if not provision.point:
+                continue
+            text = corpus[provision.corpus_key].text
+            assert re.search(rf"\({re.escape(provision.point)}\)", text), (
+                f"{provision.id} cites point ({provision.point}), but "
+                f"{provision.subdivision_id} states no such point"
+            )
+            checked += 1
+        assert checked == 5, f"point citations moved to {checked}"
