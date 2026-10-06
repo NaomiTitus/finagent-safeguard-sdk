@@ -256,3 +256,15 @@ class TestTokenPrecision:
             f"{sig}:\n    ...\n",
         )
         assert len(found) == 1, sig
+
+
+class TestEncoding:
+    def test_a_bom_prefixed_file_scans_normally(self, tmp_path: Path) -> None:
+        """A byte-order mark is legal Python. Letting it reach the parser raised
+        UnparseableSource, which is fatal by design, on a file that is fine."""
+        p = tmp_path / "bom.py"
+        p.write_bytes(
+            b"\xef\xbb\xbffrom decimal import Decimal\n\n\n"
+            b"def transfer(amount: Decimal) -> None:\n    pass\n"
+        )
+        assert [f.function for f in linter.scan_file(p)] == ["transfer"]

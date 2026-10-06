@@ -82,7 +82,7 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
     # the thing blocking merges.
     "L1": (
         LINT,
-        '    if any(token in name.lower() for name in names for token in NAME_TOKENS):\n        return "name"',
+        '    if any(_matches_tokens(name, NAME_TOKENS) for name in names):\n        return "name"',
         '    if False:\n        return "name"',
         "test_flags_by_parameter_name",
         "disable the name-token signal",
@@ -129,6 +129,51 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "test_a_file_that_does_not_parse_is_reported_not_skipped",
         "silently skip an unparseable file -- a clean run that means nothing",
     ),
+    # Day 3, write path. The review found none of this logic had a killing
+    # mutation, which is why the import-placement and file-identity defects
+    # shipped.
+    "L8": (
+        LINT,
+        '        at = _import_insert_index(text, lines)',
+        '        at = 0',
+        "test_imports_land_below_a_shebang",
+        "insert imports at line 0, above any shebang or docstring",
+    ),
+    "L9": (
+        LINT,
+        '        os.chmod(tmp, stat.S_IMODE(mode))',
+        '        pass',
+        "test_preserves_the_executable_bit",
+        "drop mode preservation, turning a 0o755 script into 0o644",
+    ),
+    "L10": (
+        LINT,
+        '    if path.is_symlink():',
+        '    if False:',
+        "test_refuses_a_symlink",
+        "follow symlinks, replacing the link and leaving the real source stale",
+    ),
+    "L11": (
+        LINT,
+        '    if not os.access(path, os.W_OK):',
+        '    if False:',
+        "test_refuses_a_read_only_file",
+        "rewrite a read-only file, which an atomic rename allows",
+    ),
+    "L12": (
+        LINT,
+        '        tmp.replace(path)',
+        '        path.write_bytes(modified.encode())',
+        "test_leaves_no_temporary_file_behind",
+        "write in place instead of atomic temp-and-rename",
+    ),
+    "L13": (
+        LINT,
+        '        return raw.decode("utf-8-sig")',
+        '        return raw.decode("utf-8")',
+        "test_a_bom_prefixed_file_scans_normally",
+        "stop stripping the byte-order mark, hard-failing a legal file",
+    ),
     "D6": (
         DECOR,
         "    return TOOL_REGISTRY.get(registry_key(func))",
@@ -164,6 +209,12 @@ BASELINE: dict[str, str] = {
     "L5": "caught",
     "L6": "caught",
     "L7": "caught",
+    "L8": "caught",
+    "L9": "caught",
+    "L10": "caught",
+    "L11": "caught",
+    "L12": "caught",
+    "L13": "caught",
 }
 
 

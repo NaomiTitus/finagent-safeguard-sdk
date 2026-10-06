@@ -282,3 +282,22 @@ class TestFileIdentity:
         p.write_bytes(b"# -*- coding: latin-1 -*-\n# caf\xe9\n" + SIMPLE.encode())
         with pytest.raises(linter.RefusedTarget, match="not UTF-8"):
             _fix(p)
+
+    def test_the_write_is_atomic_not_in_place(self, tmp_path: Path) -> None:
+        """Replacing the file must swap it, not overwrite it in place.
+
+        The difference is observable as an inode change, and it is the whole
+        point: a reader during the write sees either the old file or the new
+        one, never a half-written source file. Asserting that no temp file is
+        left behind does not test this -- the rename consumes the temp on the
+        success path, so that assertion passes just as happily when the write
+        is done in place.
+        """
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        before = p.stat().st_ino
+        _fix(p)
+        assert p.stat().st_ino != before, (
+            "the file was modified in place; a reader could observe a "
+            "half-written source file"
+        )
