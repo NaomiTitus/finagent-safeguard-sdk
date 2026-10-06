@@ -16,11 +16,12 @@ Three rules carry this module:
 from __future__ import annotations
 
 import datetime as _dt
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
-from typing import Literal
+from typing import Final, Literal
 
 from finagent_safeguard.regulation.citation import (
     NOT_YET_DETERMINED,
@@ -33,12 +34,15 @@ from finagent_safeguard.regulation.citation import (
 __all__ = [
     "REGISTRY",
     "Addressee",
+    "ApplicationDate",
     "Exemption",
     "NumericParameter",
     "Obligation",
     "Provenance",
+    "OJ_DATE_RE",
     "ReferencePoint",
     "Registry",
+    "StagedApplication",
     "RiskBasedObligation",
     "SdkRole",
     "eu_numeral",
@@ -65,6 +69,46 @@ class Addressee(StrEnum):
 
 class SdkRole(StrEnum):
     CONTRIBUTES_ONLY = "contributes_only"
+
+
+#: English month names, spelled out. Deliberately not strptime("%B"), which resolves
+#: through LC_TIME: a host application that has called setlocale(LC_TIME, "de_DE")
+#: would otherwise make this module fail at import.
+_OJ_MONTHS: dict[str, int] = {
+    m: i
+    for i, m in enumerate(
+        (
+            "January February March April May June July August September "
+            "October November December"
+        ).split(),
+        start=1,
+    )
+}
+
+#: Whitespace is deliberately permissive. The extraction pipeline does not normalise
+#: (one pinned span carries "European Union ."), and a date written with a
+#: non-breaking space would otherwise be invisible to the undeclared-date scan.
+_WS = r"[\s\u00a0]+"
+OJ_DATE_RE: Final = re.compile(
+    r"\b(\d{1,2})" + _WS + r"(" + "|".join(_OJ_MONTHS) + r")" + _WS + r"(\d{4})\b"
+)
+
+
+def _parse_oj_date(verbatim: str, expected: _dt.date, context: str) -> None:
+    """Assert a quoted date parses, in Official Journal form, to ``expected``."""
+    match = OJ_DATE_RE.fullmatch(verbatim.strip())
+    if match is None:
+        raise ValueError(
+            f"{context}: {verbatim!r} is not a date in Official Journal form "
+            '(e.g. "10 July 2027")'
+        )
+    day, month, year = match.groups()
+    parsed = _dt.date(int(year), _OJ_MONTHS[month], int(day))
+    if parsed != expected:
+        raise ValueError(
+            f"{context}: {verbatim!r} parses to {parsed}, but the declared date "
+            f"is {expected}"
+        )
 
 
 def eu_numeral(value: Decimal, currency: str | None) -> str:
@@ -145,6 +189,83 @@ class Exemption:
     deployer_assertion_required: str = ""
     #: Literal, not str: the type system forbids an exemption that creates a duty.
     effect: Literal["relaxes"] = "relaxes"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StagedApplication:
+    """A carve-out: a named class of addressees to whom a different date applies."""
+
+    date: _dt.date
+    verbatim_form: str
+    #: The WHOLE carve-out clause, verbatim. This is the pinned claim: quoting the
+    #: date and the class as two separate fragments pins neither their adjacency nor
+    #: the mapping between them, so "obliged entities" (all of them) and the article's
+    #: actual "obliged entities referred to in Article 3, points (3)(n) and (o)" are
+    #: indistinguishable. One contiguous quote pins the relationship.
+    verbatim_clause: str
+    #: A human-readable label for the class. Descriptive only -- ``verbatim_clause``
+    #: is the authority, and this field is not an independently pinned claim.
+    applies_to: str = ""
+
+    def __post_init__(self) -> None:
+        _parse_oj_date(self.verbatim_form, self.date, self.verbatim_clause[:40])
+        if self.verbatim_form not in self.verbatim_clause:
+            raise ValueError(
+                f"carve-out clause does not contain its own date "
+                f"{self.verbatim_form!r}"
+            )
+        if self.applies_to and self.applies_to not in self.verbatim_clause:
+            raise ValueError(
+                f"applies_to {self.applies_to!r} is not wording from the clause"
+            )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ApplicationDate:
+    """When an instrument applies, with a citation to the article that says so.
+
+    Every number in this registry names its source; dates were the one class of fact
+    exempt from that discipline, living in prose ``note`` fields. Dates are also exactly
+    what was wrong in the AI Act case, where a published deadline moved.
+    """
+
+    instrument: Instrument
+    #: The GENERAL application date. Classes of addressee with a different date go in
+    #: ``carve_outs``: AMLR Art. 90 stages its application, and a lone date field
+    #: silently answers two years early for the staged class.
+    date: _dt.date
+    locus: Provision
+    #: The date as the Official Journal writes it, e.g. "10 July 2027".
+    verbatim_form: str
+    carve_outs: tuple[StagedApplication, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Quoted form must parse to the declared date, and cite its own instrument.
+
+        Without the first check, the only machine-checked fact is that *some* string
+        occurs somewhere in the article -- "2025", "January", even "." would satisfy a
+        substring check, and a contradictory pair would pass while ``as_cited``
+        returned the wrong value. Without the second, a date could cite an article of
+        an entirely different regulation.
+        """
+        _parse_oj_date(self.verbatim_form, self.date, self.instrument.short_name)
+        if self.locus.instrument is not self.instrument:
+            raise ValueError(
+                f"{self.instrument.short_name}: locus cites "
+                f"{self.locus.instrument.short_name} ({self.locus.id}). A date must be "
+                "traceable to an article of the instrument it describes."
+            )
+
+    @property
+    def as_cited(self) -> str:
+        return self.verbatim_form
+
+    @property
+    def all_dates(self) -> tuple[tuple[_dt.date, str], ...]:
+        """Every date this entry accounts for, general and staged."""
+        return ((self.date, self.verbatim_form),) + tuple(
+            (c.date, c.verbatim_form) for c in self.carve_outs
+        )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -408,7 +529,22 @@ TFR_ART_4_4 = Provision(
         "information referred to in paragraph 1"
     ),
 )
-TFR_ART_5 = Provision(instrument=TFR, article="5", subdivision_id="art_5")
+TFR_ART_5_2_B = Provision(
+    instrument=TFR,
+    article="5",
+    paragraph="2",
+    point="b",
+    subdivision_id="art_5",
+    obligation_text=(
+        "transfers of funds not exceeding EUR 1 000 that do not appear to be linked "
+        "to other transfers of funds which, together with the transfer in question, "
+        "exceed EUR 1 000"
+    ),
+    tags=("defines_the_bracket", "not_a_reporting_threshold"),
+)
+
+AMLR_ART_90 = Provision(instrument=AMLR, article="90", subdivision_id="art_90")
+DORA_ART_64 = Provision(instrument=DORA, article="64", subdivision_id="art_64")
 
 DORA_ART_23 = Provision(instrument=DORA, article="23", subdivision_id="art_23")
 DORA_ART_28_3 = Provision(
@@ -633,6 +769,52 @@ REFERENCE_POINTS: tuple[ReferencePoint, ...] = (
         ),
         applies_from=_dt.date(2027, 7, 10),
     ),
+    ReferencePoint(
+        parameter=NumericParameter(
+            name="tfr.art5.3.verification_derogation",
+            value=Decimal("1000"),
+            currency="EUR",
+            provenance=Provenance.REGULATORY_VERBATIM,
+            locus=TFR_ART_5_2_B,
+        ),
+        governs=(
+            "Defines the bracket of intra-Union transfers -- not exceeding this amount, "
+            "and not appearing linked to others that together exceed it -- to which the "
+            "Art. 5(3) derogation from the Art. 4(4) duty to verify payer information "
+            "applies. The figure is cited here at Art. 5(2)(b), where it actually "
+            "appears; Art. 5(3) incorporates it by reference and contains no monetary "
+            "figure of its own. Governs VERIFICATION, not reporting -- it is commonly "
+            "misdescribed as a reporting threshold and is not one."
+        ),
+    ),
+)
+
+APPLICATION_DATES: tuple[ApplicationDate, ...] = (
+    ApplicationDate(
+        instrument=AMLR,
+        date=_dt.date(2027, 7, 10),
+        locus=AMLR_ART_90,
+        verbatim_form="10 July 2027",
+        carve_outs=(
+            StagedApplication(
+                date=_dt.date(2029, 7, 10),
+                verbatim_form="10 July 2029",
+                verbatim_clause=(
+                    "except in relation to obliged entities referred to in Article 3, "
+                    "points (3)(n) and (o), to which it shall apply from 10 July 2029"
+                ),
+                applies_to=(
+                    "obliged entities referred to in Article 3, points (3)(n) and (o)"
+                ),
+            ),
+        ),
+    ),
+    ApplicationDate(
+        instrument=DORA,
+        date=_dt.date(2025, 1, 17),
+        locus=DORA_ART_64,
+        verbatim_form="17 January 2025",
+    ),
 )
 
 # --------------------------------------------------------------------------
@@ -644,6 +826,7 @@ class Registry:
     _obligations: tuple[Obligation, ...]
     _exemptions: tuple[Exemption, ...]
     _reference_points: tuple[ReferencePoint, ...]
+    _application_dates: tuple[ApplicationDate, ...]
 
     def instruments(self) -> tuple[Instrument, ...]:
         return self._instruments
@@ -656,6 +839,9 @@ class Registry:
 
     def reference_points(self) -> tuple[ReferencePoint, ...]:
         return self._reference_points
+
+    def application_dates(self) -> tuple[ApplicationDate, ...]:
+        return self._application_dates
 
     def exemption(self, exemption_id: str) -> Exemption:
         for exemption in self._exemptions:
@@ -682,8 +868,13 @@ class Registry:
             for limb in e.limbs
             if limb.locus is not None
         ]
+        candidates += [d.locus for d in self._application_dates]
         for provision in candidates:
-            key = f"{provision.corpus_key}|{provision.id}"
+            # Dedup on the whole frozen provision, not on corpus_key|id. Keying on the
+            # citation alone silently dropped a second provision carrying the SAME
+            # citation with a DIFFERENT obligation_text, so a fabricated quotation
+            # could enter the registry and never reach the substring check.
+            key = repr(provision)
             if key not in seen:
                 seen.add(key)
                 yield provision
@@ -694,4 +885,5 @@ REGISTRY = Registry(
     _obligations=OBLIGATIONS,
     _exemptions=EXEMPTIONS,
     _reference_points=REFERENCE_POINTS,
+    _application_dates=APPLICATION_DATES,
 )

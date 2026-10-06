@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from finagent_safeguard.regulation import registry as reg
-from finagent_safeguard.regulation.citation import Status
+from finagent_safeguard.regulation.citation import NOT_YET_DETERMINED, Status
 from finagent_safeguard.regulation.registry import REGISTRY, Provenance
 
 BASE_ACT_CELEX = re.compile(r"^3\d{4}[LRD]\d{4}$")
@@ -92,17 +92,23 @@ class TestQuotation:
         PLAN.md section 3: a test whose docstring paraphrases is not done.
         The same rule applies to the registry's own obligation_text.
         """
+        checked = 0
         for provision in REGISTRY.provisions():
             if not provision.obligation_text:
                 continue
             span = corpus[provision.corpus_key]
             assert provision.obligation_text in span.text, provision.id
+            checked += 1
+        assert checked == 15, f"quotation count moved to {checked}; update deliberately"
 
     def test_every_provision_resolves_to_a_pinned_corpus_entry(
         self, corpus: dict[str, Any]
     ) -> None:
+        checked = 0
         for provision in REGISTRY.provisions():
             assert provision.corpus_key in corpus, provision.id
+            checked += 1
+        assert checked == 23, f"provision count moved to {checked}; update deliberately"
 
 
 class TestCitationForm:
@@ -210,3 +216,148 @@ class TestReferencePoints:
         figure goes so that nobody has to invent one."""
         for point in REGISTRY.reference_points():
             assert point.operative is False, point.parameter.name
+
+
+class TestNoOrphans:
+    """Both directions. A pinned span nothing cites, or a declared provision nothing
+    reaches, is dead weight that looks like coverage."""
+
+    def test_no_pinned_span_is_uncited(self, corpus: dict[str, Any]) -> None:
+        cited = {p.corpus_key for p in REGISTRY.provisions()}
+        uncited = sorted(set(corpus) - cited)
+        assert not uncited, f"pinned but cited by nothing: {uncited}"
+
+    def test_every_declared_provision_is_reachable(self) -> None:
+        from finagent_safeguard.regulation.citation import Provision
+
+        # repr(), matching provisions(). Keying on corpus_key|id collapses
+        # field-distinct provisions onto one citation, so an orphan carrying a
+        # fabricated obligation_text is invisible -- the same mistake this PR
+        # fixes in provisions() three lines of code away.
+        declared = {repr(v) for v in vars(reg).values() if isinstance(v, Provision)}
+        reachable = {repr(p) for p in REGISTRY.provisions()}
+        orphans = sorted(declared - reachable)
+        assert not orphans, f"declared but unreachable from the registry: {orphans}"
+
+
+class TestApplicationDateProvenance:
+    """Every number in this registry names its source. Dates were exempt, and dates are
+    the class of fact that was wrong in the AI Act case."""
+
+    def test_declared_application_dates_appear_in_their_pinned_span(
+        self, corpus: dict[str, Any]
+    ) -> None:
+        assert REGISTRY.application_dates(), "no application date carries provenance"
+        for entry in REGISTRY.application_dates():
+            span = corpus[entry.locus.corpus_key]
+            assert entry.as_cited in span.text, (
+                f"{entry.instrument.short_name}: {entry.as_cited!r} absent from "
+                f"{entry.locus.id}"
+            )
+
+    def test_declared_date_matches_the_instrument(self) -> None:
+        for entry in REGISTRY.application_dates():
+            assert entry.date == entry.instrument.applies_from, entry.instrument.short_name
+
+    def test_instruments_without_date_provenance_are_the_documented_set(self) -> None:
+        """A two-way lock on the date-provenance gap, not a one-way ratchet.
+
+        Adding an instrument without date provenance fails the build; so does adding
+        provenance for one of these four. Both directions require a deliberate edit
+        here, which is the point.
+
+        Filtered on whether an application date exists to cite at all, not on status:
+        a status-shaped filter would let a non-IN_FORCE instrument join the gap
+        silently, which is exactly what this test exists to prevent.
+        """
+        covered = {e.instrument.short_name for e in REGISTRY.application_dates()}
+        missing = {
+            i.short_name
+            for i in REGISTRY.instruments()
+            if i.short_name not in covered and i.applies_from != NOT_YET_DETERMINED
+        }
+        assert missing == {"PSD2", "RTS on SCA", "GDPR", "TFR"}, (
+            f"date-provenance gap changed: {sorted(missing)}"
+        )
+
+
+class TestStagedApplicationDates:
+    """An article that states two application dates must have both declared.
+
+    AMLR Art. 90 applies from 10 July 2027 "except in relation to obliged entities
+    referred to in Article 3, points (3)(n) and (o), to which it shall apply from
+    10 July 2029". A single date field answers two years early for that class.
+    """
+
+    def test_every_date_in_the_span_is_accounted_for(self, corpus: dict[str, Any]) -> None:
+        for entry in REGISTRY.application_dates():
+            span = corpus[entry.locus.corpus_key]
+            in_text = {m.group(0) for m in reg.OJ_DATE_RE.finditer(span.text)}
+            declared = {v for _d, v in entry.all_dates}
+            undeclared = sorted(in_text - declared)
+            assert not undeclared, (
+                f"{entry.instrument.short_name} {entry.locus.id} states "
+                f"{sorted(in_text)} but the registry declares only {sorted(declared)}. "
+                "An undeclared date is a staged application the registry is flattening."
+            )
+
+    def test_carve_out_clauses_are_verbatim(self, corpus: dict[str, Any]) -> None:
+        """The whole clause, not two fragments.
+
+        Quoting the date and the class separately pins neither their adjacency nor
+        the mapping between them: "obliged entities" and the article's actual
+        "obliged entities referred to in Article 3, points (3)(n) and (o)" are both
+        substrings, and they mean different things.
+        """
+        checked = 0
+        for entry in REGISTRY.application_dates():
+            span = corpus[entry.locus.corpus_key]
+            for carve in entry.carve_outs:
+                assert carve.verbatim_clause in span.text, (
+                    f"{entry.locus.id}: carve-out clause is not verbatim"
+                )
+                checked += 1
+        assert checked == 1, f"carve-out count moved to {checked}; update deliberately"
+
+    def test_general_date_is_stated_outside_every_carve_out(
+        self, corpus: dict[str, Any]
+    ) -> None:
+        """Generalises what a hard-coded `carve_outs[0].date.year == 2029` could not.
+
+        If an author swapped the general and staged dates, the general date would be
+        found only inside the carve-out clause. Removing the clauses and requiring the
+        general date to survive catches that for any article, not just AMLR.
+        """
+        for entry in REGISTRY.application_dates():
+            remainder = corpus[entry.locus.corpus_key].text
+            for carve in entry.carve_outs:
+                remainder = remainder.replace(carve.verbatim_clause, " ")
+            assert entry.verbatim_form in remainder, (
+                f"{entry.instrument.short_name}: {entry.verbatim_form!r} appears only "
+                "inside a carve-out clause, so it is a staged date, not the general one"
+            )
+
+    def test_an_article_that_stages_its_application_declares_a_carve_out(
+        self, corpus: dict[str, Any]
+    ) -> None:
+        """No instrument named by hand: if the span states more than one date, the
+        entry must declare the extras."""
+        for entry in REGISTRY.application_dates():
+            span = corpus[entry.locus.corpus_key]
+            dates = {m.group(0) for m in reg.OJ_DATE_RE.finditer(span.text)}
+            if len(dates) > 1:
+                assert entry.carve_outs, (
+                    f"{entry.locus.id} states {sorted(dates)}; a single date field "
+                    "flattens a staged application"
+                )
+
+    def test_locus_must_belong_to_the_instrument(self) -> None:
+        import datetime as _dt
+
+        with pytest.raises(ValueError, match="must be traceable"):
+            reg.ApplicationDate(
+                instrument=reg.AMLR,
+                date=_dt.date(2025, 1, 17),
+                locus=reg.DORA_ART_64,
+                verbatim_form="17 January 2025",
+            )
