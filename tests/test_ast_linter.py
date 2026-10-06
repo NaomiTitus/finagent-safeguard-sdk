@@ -147,3 +147,112 @@ class TestSyntaxErrors:
         like a clean run."""
         with pytest.raises(linter.UnparseableSource):
             _findings(tmp_path, "def transfer(amount:\n")
+
+
+class TestNestedDefinitions:
+    """A def behind a feature flag or inside try/except is ordinary code.
+
+    Stopping traversal at class and function children left all of these
+    invisible to every signal, the structural backstop included.
+    """
+
+    @pytest.mark.parametrize(
+        ("wrapper", "label"),
+        [
+            ("try:\n{body}\nexcept ImportError:\n    pass\n", "try/except"),
+            ("if FEATURE_ON:\n{body}\n", "feature flag"),
+            ("with open('x') as fh:\n{body}\n", "with"),
+            ("for _ in range(1):\n{body}\n", "for"),
+        ],
+    )
+    def test_finds_a_def_inside_a_statement_body(
+        self, tmp_path: Path, wrapper: str, label: str
+    ) -> None:
+        body = "    def transfer(amount: Decimal) -> None:\n        pass"
+        found = _findings(
+            tmp_path, "from decimal import Decimal\n\nFEATURE_ON = True\n\n"
+            + wrapper.format(body=body)
+        )
+        assert [f.function for f in found] == ["transfer"], label
+
+    def test_finds_a_method_on_a_conditionally_defined_class(
+        self, tmp_path: Path
+    ) -> None:
+        found = _findings(
+            tmp_path,
+            "from decimal import Decimal\n\nFEATURE_ON = True\n\n"
+            "if FEATURE_ON:\n"
+            "    class Payments:\n"
+            "        def transfer(self, amount: Decimal) -> None:\n            pass\n",
+        )
+        assert [f.function for f in found] == ["Payments.transfer"]
+
+    def test_the_bank_client_backstop_reaches_nested_defs(self, tmp_path: Path) -> None:
+        """The signal advertised as not caring what a function is called also
+        has to not care where it sits."""
+        found = _findings(
+            tmp_path,
+            "import sys\n"
+            "from tests.fixtures.linter.fake_bank import BankClient\n\n"
+            "if sys.version_info >= (3, 11):\n"
+            "    def handle_it(x: str) -> None:\n"
+            "        BankClient().post(x, {})\n",
+        )
+        assert [f.function for f in found] == ["handle_it"]
+        assert found[0].signal == "bank_client_import"
+
+
+class TestDecoratorResolution:
+    def test_an_aliased_decorator_counts_as_classified(self, tmp_path: Path) -> None:
+        """Otherwise --fix stacks a second decorator with its own guessed
+        category on a function that was already classified."""
+        found = _findings(
+            tmp_path,
+            "from decimal import Decimal\n"
+            "from finagent_safeguard.core.decorators import regulated_tool as regulated\n"
+            "from finagent_safeguard.taxonomy.policies import FinancialCategory\n\n\n"
+            "@regulated(FinancialCategory.PSD2_PAYMENT_EXECUTION)\n"
+            "def transfer(amount: Decimal) -> None:\n    pass\n",
+        )
+        assert found == []
+
+    def test_a_lookalike_decorator_does_not_count_as_classified(
+        self, tmp_path: Path
+    ) -> None:
+        """The old substring test over ast.dump read `@deprecated("use
+        regulated_tool instead")` as a classification, silently exempting a
+        function that handles money."""
+        found = _findings(
+            tmp_path,
+            "from decimal import Decimal\n\n\n"
+            '@deprecated("use regulated_tool instead")\n'
+            "def transfer(amount: Decimal) -> None:\n    pass\n",
+        )
+        assert [f.function for f in found] == ["transfer"]
+
+
+class TestTokenPrecision:
+    @pytest.mark.parametrize(
+        "name", ["expand", "discard", "wildcard_match", "japan_locale", "company_name"]
+    )
+    def test_does_not_flag_a_lookalike_name(self, tmp_path: Path, name: str) -> None:
+        """Substring matching flagged all of these -- and labelled `expand` as
+        GDPR personal-data processing, because it contains "pan"."""
+        found = _findings(tmp_path, f"def {name}(template: str) -> str:\n    return ''\n")
+        assert found == [], name
+
+    @pytest.mark.parametrize(
+        "sig",
+        [
+            "def move(src: str, dst: str, value: Decimal, /) -> None",
+            "def settle(*values: Decimal) -> None",
+            "def lookup(customer_ref: str) -> Money",
+        ],
+    )
+    def test_reads_the_whole_signature(self, tmp_path: Path, sig: str) -> None:
+        found = _findings(
+            tmp_path,
+            "from decimal import Decimal\nfrom mytypes import Money\n\n\n"
+            f"{sig}:\n    ...\n",
+        )
+        assert len(found) == 1, sig

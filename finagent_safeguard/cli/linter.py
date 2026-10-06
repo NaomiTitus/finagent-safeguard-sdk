@@ -21,6 +21,7 @@ places, and nothing downstream catches it.
 from __future__ import annotations
 
 import ast
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -31,9 +32,14 @@ __all__ = ["Finding", "UnparseableSource", "scan_file", "scan_source"]
 #: parameter name.
 NAME_TOKENS: Final[frozenset[str]] = frozenset(
     {
+        # money
         "amount", "iban", "bic", "swift", "payee", "payer", "recipient",
-        "transfer", "payment", "balance", "account", "card", "pan",
+        "transfer", "transfers", "payment", "payments", "balance", "account",
+        "card", "pan", "charge", "debit", "credit", "refund", "fee", "price",
+        "withdraw", "deposit", "wire", "funds", "settle", "remit",
+        # identifiable people
         "national_id", "personnummer", "fodselsnummer", "henkilotunnus", "cpr",
+        "ssn", "email", "phone", "address", "dob", "date_of_birth", "customer",
     }
 )
 
@@ -77,6 +83,27 @@ class Finding:
     signal: str
 
 
+def _words(name: str) -> set[str]:
+    """Split an identifier into whole words.
+
+    Substring matching flagged ``expand`` and ``japan_locale`` for containing
+    "pan", ``discard`` for "card", and -- worse -- labelled a template helper as
+    GDPR personal-data processing. A linter that does that is the one that gets
+    switched off.
+    """
+    parts = re.split(r"[^a-z0-9]+", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower())
+    return {p for p in parts if p}
+
+
+def _matches_tokens(name: str, tokens: frozenset[str]) -> bool:
+    words = _words(name)
+    if words & tokens:
+        return True
+    # Multi-word tokens such as "national_id" are matched against the joined form.
+    joined = "_".join(sorted(words))
+    return any("_" in token and token in name.lower() for token in tokens) or joined in tokens
+
+
 def _annotation_names(node: ast.AST) -> set[str]:
     out: set[str] = set()
     for child in ast.walk(node):
@@ -87,11 +114,39 @@ def _annotation_names(node: ast.AST) -> set[str]:
     return out
 
 
-def _is_classified(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    for decorator in node.decorator_list:
-        if _DECORATOR_MARKER in ast.dump(decorator):
-            return True
-    return False
+def _classifier_aliases(tree: ast.AST) -> set[str]:
+    """Every local name bound to the classification decorator, aliases included.
+
+    ``from ... import regulated_tool as regulated`` was unrecognised, so --fix
+    stacked a second decorator on an already-classified function. The old
+    substring test over ``ast.dump`` also failed the other way: a docstring
+    reading "use regulated_tool instead" made an unclassified function look
+    classified, silently exempting it.
+    """
+    aliases = {_DECORATOR_MARKER}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == _DECORATOR_MARKER:
+                    aliases.add(alias.asname or alias.name)
+    return aliases
+
+
+def _decorator_name(node: ast.expr) -> str | None:
+    """The bare name a decorator expression resolves to, or None."""
+    if isinstance(node, ast.Call):
+        node = node.func
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _is_classified(
+    node: ast.FunctionDef | ast.AsyncFunctionDef, aliases: set[str]
+) -> bool:
+    return any(_decorator_name(d) in aliases for d in node.decorator_list)
 
 
 def _reaches_bank(tree: ast.AST) -> bool:
@@ -110,11 +165,19 @@ def _signal_for(
     node: ast.FunctionDef | ast.AsyncFunctionDef, *, bank: bool
 ) -> str | None:
     """Which signal fires for this function, if any. Order is reporting order."""
-    names = {node.name, *(a.arg for a in node.args.args), *(a.arg for a in node.args.kwonlyargs)}
-    if any(token in name.lower() for name in names for token in NAME_TOKENS):
+    args = node.args
+    all_args = [
+        *args.posonlyargs, *args.args, *args.kwonlyargs,
+        *([args.vararg] if args.vararg else []),
+        *([args.kwarg] if args.kwarg else []),
+    ]
+    names = {node.name, *(a.arg for a in all_args)}
+    if any(_matches_tokens(name, NAME_TOKENS) for name in names):
         return "name"
 
-    annotated = [a.annotation for a in node.args.args + node.args.kwonlyargs if a.annotation]
+    annotated = [a.annotation for a in all_args if a.annotation]
+    if node.returns is not None:
+        annotated.append(node.returns)
     for annotation in annotated:
         if _annotation_names(annotation) & RISKY_ANNOTATIONS:
             return "type"
@@ -135,12 +198,14 @@ def scan_source(source: str, path: Path) -> list[Finding]:
     lines = source.splitlines()
     findings: list[Finding] = []
 
+    aliases = _classifier_aliases(tree)
+
     def walk(node: ast.AST, prefix: str) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, ast.ClassDef):
                 walk(child, f"{prefix}{child.name}.")
             elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if not _is_classified(child):
+                if not _is_classified(child, aliases):
                     signal = _signal_for(child, bank=bank)
                     if signal is not None:
                         line = min(
@@ -157,6 +222,14 @@ def scan_source(source: str, path: Path) -> list[Finding]:
                             )
                         )
                 walk(child, f"{prefix}{child.name}.")
+            else:
+                # Descend into if / try / with / for / match bodies. Stopping at
+                # class and function children left a def behind a feature flag or
+                # inside try/except ImportError invisible to ALL THREE signals,
+                # the structural backstop included -- ordinary code, not
+                # adversarial, and the exact false negative the module docstring
+                # calls the dangerous direction.
+                walk(child, prefix)
 
     walk(tree, "")
     return findings
