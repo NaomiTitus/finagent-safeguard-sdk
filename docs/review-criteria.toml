@@ -22,6 +22,12 @@ name-assertion matching - must be enforced by the test suite and by CI rather \
 than depending on someone remembering to run them; and a merge must be blocked \
 when they fail."""
 
+"day3/ast-linter" = """
+The linter must find every function that touches money or personal data in a \
+module that can reach the bank client, including functions no naming \
+convention would reveal; and --fix must never leave a source file in a state \
+the developer did not inspect."""
+
 "review/self-serve-packets" = """
 A review packet must be assembled by tooling from a git ref, not by the author, \
 and must state what it excluded and why; and the criterion a review judges \

@@ -18,6 +18,7 @@ from pathlib import Path
 AGENT = "finagent_safeguard/core/agent.py"
 DECOR = "finagent_safeguard/core/decorators.py"
 REGIS = "finagent_safeguard/regulation/registry.py"
+LINT = "finagent_safeguard/cli/linter.py"
 
 # id: (file, find, replace, expected killer, note)
 MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
@@ -74,6 +75,63 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "the span is article-level so the provenance check cannot tell, and the "
         "paragraph field is never validated against anything",
     ),
+    # Day 3. One row per detection signal: a signal with no killing mutation is
+    # decoration, present and free to rot once it is the thing blocking merges.
+    "L1": (
+        LINT,
+        '    if any(token in name.lower() for name in names for token in NAME_TOKENS):
+        return "name"',
+        '    if False:
+        return "name"',
+        "test_flags_by_parameter_name",
+        "disable the name-token signal",
+    ),
+    "L2": (
+        LINT,
+        "        if _annotation_names(annotation) & RISKY_ANNOTATIONS:
+            return \"type\"",
+        "        if False:
+            return \"type\"",
+        "test_flags_by_type_annotation_only",
+        "disable the type-annotation signal",
+    ),
+    "L3": (
+        LINT,
+        '    if bank and not node.name.startswith("_"):
+        return "bank_client_import"',
+        '    if False:
+        return "bank_client_import"',
+        "test_flags_public_functions_in_a_module_reaching_the_bank",
+        "disable the bank-client import rule",
+    ),
+    "L4": (
+        LINT,
+        "    for finding in sorted(findings, key=lambda f: f.insert_line, reverse=True):",
+        "    for finding in sorted(findings, key=lambda f: f.insert_line):",
+        "test_multiple_functions_all_land_correctly",
+        "apply edits top-down, so earlier inserts shift later line numbers",
+    ),
+    "L5": (
+        LINT,
+        "    if before != after:",
+        "    if False:",
+        "test_aborts_when_the_reparse_changes_the_function_set",
+        "skip the re-parse verification before writing",
+    ),
+    "L6": (
+        LINT,
+        "    if fresh != [(f.function, f.insert_line) for f in findings]:",
+        "    if False:",
+        "test_aborts_if_the_file_changed_since_it_was_read",
+        "skip the TOCTOU check",
+    ),
+    "L7": (
+        LINT,
+        '        raise UnparseableSource(f"{path}: {exc}") from exc',
+        "        return []",
+        "test_a_file_that_does_not_parse_is_reported_not_skipped",
+        "silently skip an unparseable file -- a clean run that means nothing",
+    ),
     "D6": (
         DECOR,
         "    return TOOL_REGISTRY.get(registry_key(func))",
@@ -102,6 +160,13 @@ BASELINE: dict[str, str] = {
     # so fabricating Art. 5(9)(z) is caught. Hand-updated, which is the
     # intended friction -- a mutation becoming caught is a fix worth noticing.
     "R13": "caught",
+    "L1": "caught",
+    "L2": "caught",
+    "L3": "caught",
+    "L4": "caught",
+    "L5": "caught",
+    "L6": "caught",
+    "L7": "caught",
 }
 
 
