@@ -192,3 +192,43 @@ Two concrete rules, not aspirations:
 Both failures share a shape: an assertion about state made from memory of a command run
 earlier, not from the state itself. That is precisely what Layer 0 exists to catch, and
 neither was caught by me.
+## 2026-10-04 — `main..fix/registry-vacuity` — session two, PR #1
+
+**Verdict:** approved with notes
+**Layers run:** 0, 1a, 1c, 3 (1b covered by the meta-suite on PR #2; 4 pending)
+**Mutations:** R12 now caught by 4 tests
+
+### Approved
+
+- Layer 0: **5/5 claims verified** — 85 passing, mypy clean, digest unchanged at
+  `f57c993491ab`, all three cited articles already pinned.
+- Layer 3, AMLR Art. 90: *"It shall apply from 10 July 2027, except in relation to obliged
+  entities referred to in Article 3, points (3)(n) and (o)"* — supports the claim exactly.
+- Layer 3, DORA Art. 64: *"It shall apply from 17 January 2025"* — supports the claim exactly.
+- F-001 resolved: mutation R12 killed by 4 tests, was killed by none.
+
+### Flagged
+
+- **F-011 — a numeral's *role* is unverified when an article mentions it more than once.
+  MEDIUM.** Pinning is article-level; citations are paragraph-level. `EUR 1 000` occurs
+  **three times** in TFR Art. 5, in at least two roles: Art. 5(2) is an
+  information-on-request boundary, Art. 5(3) is the derogation from the Art. 4(4)
+  verification duty. The provenance test only asserts the numeral appears *somewhere in the
+  article*, so it cannot confirm the number is in the role the registry assigns it.
+
+  The registry's claim here is **correct** — the span does contain "By way of derogation from
+  Article 4(4)" and "need not verify". The defect is that nothing would have told us if it
+  were wrong. This is the same shape as the founding EUR 30 error: real number, real
+  citation, unverified role.
+
+  → becomes: mutation **R13**, baselined as `not_caught`, so CI reports the gap on every run
+  and it cannot be forgotten. **Trigger:** closes with the Day 6 entailment check, which
+  reasons over the quote and can therefore distinguish 5(2) from 5(3). When it closes, the
+  baseline must be updated by hand — the same deliberate friction as the corpus golden
+  constants.
+
+### Process finding
+
+- I wrote "logged" in the session report one message *after* running Layer 0, before the
+  entry existed. Caught by the user, not by me. A claim about the review process is still a
+  claim, and the audit does not exempt itself.

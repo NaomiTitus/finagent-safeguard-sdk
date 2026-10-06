@@ -66,7 +66,10 @@ class TestSubdivisionExtraction:
             ingest.extract_subdivision(rts_sca_html, "art_999")
 
     def test_extraction_makes_no_network_call(self, rts_sca_html: str, no_network: None) -> None:
-        ingest.extract_subdivision(rts_sca_html, "art_16")
+        """The no_network fixture raises on any outbound call; assert the real
+        result too, so the test states what it checks rather than relying on a
+        fixture side effect."""
+        assert ingest.extract_subdivision(rts_sca_html, "art_16").text
 
 
 class TestConsolidatedVersionSelection:
