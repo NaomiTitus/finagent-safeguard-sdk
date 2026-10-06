@@ -4,6 +4,10 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Without this the staleness job below is gated on an event that never
+  # arrives, so the one check meant to fire with no human fires never.
+  schedule:
+    - cron: "17 6 * * 1"
 
 # Successive pushes to one PR cancel the previous run.
 concurrency:
@@ -14,9 +18,10 @@ permissions:
   contents: read
 
 jobs:
-  # Everything here runs with no credentials, by design. A test asserts that this
-  # job references no secrets, which turns "runs on a fresh clone" from a promise
-  # into a structural fact.
+  # Everything here runs with no credentials, by design.
+  # tests/test_meta_suite.py::TestWorkflowIsCredentialFree parses this file and
+  # asserts the job references no secrets. The assertion is real; an earlier
+  # version of this comment claimed a test that did not exist.
   fast:
     name: tests, types, meta-suite
     runs-on: ubuntu-latest

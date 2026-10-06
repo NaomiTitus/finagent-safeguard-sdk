@@ -232,3 +232,89 @@ neither was caught by me.
 - I wrote "logged" in the session report one message *after* running Layer 0, before the
   entry existed. Caught by the user, not by me. A claim about the review process is still a
   claim, and the audit does not exempt itself.
+
+---
+
+## 2026-10-04 — session five, on the stack tip — enforcement machinery hardened
+
+Fifth cold review returned `changes needed` with 17 findings against the machinery built to
+make review automatic. The irony is the point: I had just told the user this machinery was
+what did not depend on my diligence.
+
+### Fixed
+
+- **The drift alarm could never run.** `staleness` was gated `if: event_name == 'schedule'`
+  with no `schedule:` trigger. The one check meant to fire without a human fired never.
+  Trigger added, and a test now asserts the job is reachable.
+- **The meta-suite audited half the suite it governed.** It saw only `def test_*` in
+  `test_*.py`, so `async def`, `testCamelCase` and `*_test.py` were invisible while pytest
+  collected them. A file violating all three lint rules passed clean. Scanner now matches
+  pytest's own collection.
+- **The F-003 guard was pinned to one indentation level.** The regex demanded exactly eight
+  spaces, so a module-level test at four walked past. Anchored at four or more.
+- **Both assertion lints were substring greps satisfiable by prose.** `"assert"` in a
+  docstring counted -- and one test in this repo had exactly that, so deleting its only real
+  assertion would have left the lint green. Replaced with AST inspection for `ast.Assert`
+  and `raises`/`fail` calls.
+- **The negative-name fragments reached almost nothing.** `"rejected"` did not match
+  `"rejects"`. Widened -- then narrowed again: `"no_"` was tried and dropped because it
+  matched `makes_no_network_call`, which promises an absence rather than a rejection. A lint
+  that cries wolf gets deleted rather than fixed.
+- **`check()` iterated `BASELINE`, not `MUTATIONS`.** A mutation added without a baseline
+  entry never ran, while the summary still reported "N mutations match baseline". Both
+  directions are now pinned.
+- **The leak alarm was disabled on any dirty tree** -- the normal state while developing. It
+  now compares per-file dirtiness for the files mutations touch.
+- **The workflow comment asserted a test that did not exist** ("a test asserts this job
+  references no secrets"). The test is now written. A comment claiming an enforcement that
+  does not exist is worse than no comment, because the next reviewer trusts it.
+- **`repr()` as a dedup key was a proxy.** One `field(repr=False)` would have collapsed two
+  field-distinct provisions -- reinstating the bug it replaced -- and blinded the mirror test
+  in the same stroke, since that test keyed on `repr()` too. `Provision` is frozen and
+  hashable; the set is now exact.
+- **The vacuity floors were below the true counts** (`reference_points >= 4` with five
+  present) and the class docstring claimed a structural property it did not have. Counts are
+  pinned exactly, measured rather than guessed, and the docstring now says it is a test.
+- **The date-provenance allowlist had the hole its docstring bragged about avoiding.** It
+  rejected a status-shaped filter, then used a sentinel-shaped one with the same shape:
+  declaring `NOT_YET_DETERMINED` exempted an instrument silently. All instruments are now
+  accounted for in exactly one of three sets.
+- **F-011 narrowed. R13 flips to `caught`.** Citation structure is now validated against the
+  span: a cited paragraph must appear as a paragraph marker, a cited point as `(x)`. All 12
+  real paragraph citations and 5 point citations pass; fabricating Art. 5(9)(z) fails. The
+  baseline was hand-updated, which is the intended friction.
+
+### Still open
+
+- **F-011 proper.** Structure is validated; *role* is not. Art. 5(2) and Art. 5(3) are still
+  indistinguishable to a substring check, as are the opposing "exceeding" and "not exceeding"
+  wordings of the same figure. Trigger: Day 6 entailment.
+- **Merge blocking.** Repo configuration, not code. Branch protection was removed to break a
+  deadlock and must be restored once the workflow reaches `main`.
+- **`Instrument.applies_from` remains a flat single date** alongside the staged model.
+  Nothing yet makes `ApplicationDate` the authority. Trigger: first consumer.
+- **`OJ_DATE_RE` reads one date format**, so `1.7.2027` is invisible to the undeclared-date
+  scan, and an unrelated cross-reference date fires it spuriously. Trigger: Day 6.
+- **`conftest.no_network` patches `urllib.request.urlopen` by attribute only**, so a
+  `from urllib.request import urlopen` import walks past it. The test name promises more than
+  the fixture proves.
+
+---
+
+## 2026-10-06 — process note: the stack was never a managed stack
+
+**What happened.** Asked to "use gh stacks to stack the PR", I installed
+`github/gh-stack` and then created every PR with `gh pr create --base <parent>` instead.
+`gh stack list` prints help rather than a stack, because `gh stack init` was never run.
+
+**Consequence.** The three PRs are a valid manual base-chain — GitHub auto-retargets each
+one when its parent merges — but they are not a managed stack. There is no merge-the-stack
+operation on the top PR, and merging is three bottom-up merges rather than one. The manual
+arrangement also cost a hand rebase and a merge conflict that `gh stack restack` would have
+handled.
+
+**Not being changed.** Unpicking a three-deep stack mid-review buys nothing; the chain works.
+
+**For next time.** Run `gh stack init` *before* cutting the first branch of a stack, not
+after. Installing a tool and then not using it is worse than not installing it, because the
+install reads as evidence the tool was used.

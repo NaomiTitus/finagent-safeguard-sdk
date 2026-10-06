@@ -856,7 +856,7 @@ class Registry:
             yield point.parameter
 
     def provisions(self) -> Iterator[Provision]:
-        seen: set[str] = set()
+        seen: set[Provision] = set()
         candidates: list[Provision] = [o.provision for o in self._obligations]
         candidates += [e.provision for e in self._exemptions]
         candidates += [
@@ -870,13 +870,13 @@ class Registry:
         ]
         candidates += [d.locus for d in self._application_dates]
         for provision in candidates:
-            # Dedup on the whole frozen provision, not on corpus_key|id. Keying on the
-            # citation alone silently dropped a second provision carrying the SAME
-            # citation with a DIFFERENT obligation_text, so a fabricated quotation
-            # could enter the registry and never reach the substring check.
-            key = repr(provision)
-            if key not in seen:
-                seen.add(key)
+            # Dedup on the provision itself. Provision is frozen, therefore
+            # hashable, so this is exact. repr() was a proxy for it, and a single
+            # field(repr=False) would have collapsed two field-distinct provisions
+            # -- reinstating the bug this replaced -- while blinding the mirror
+            # test in the same stroke, since that test also keyed on repr().
+            if provision not in seen:
+                seen.add(provision)
                 yield provision
 
 
