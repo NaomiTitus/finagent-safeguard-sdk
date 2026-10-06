@@ -212,7 +212,13 @@ class TestWorkflowIsCredentialFree:
         """
         header = self.WORKFLOW.read_text().split("jobs:")[0]
         assert "schedule:" in header
-        assert "schedule" in self._job("staleness")
+        assert "workflow_dispatch:" in header, (
+            "without a manual trigger the drift alarm cannot be proven to run, "
+            "only assumed to"
+        )
+        job = self._job("staleness")
+        assert "schedule" in job
+        assert "workflow_dispatch" in job
 
 
 class TestReviewPacketsAreSelfServe:

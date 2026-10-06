@@ -8,6 +8,10 @@ on:
   # arrives, so the one check meant to fire with no human fires never.
   schedule:
     - cron: "17 6 * * 1"
+  # So the drift alarm can be proven to run, rather than assumed to. A job that
+  # has never executed is configuration, not a check -- and this one was dead on
+  # arrival once already, gated on an event the workflow did not declare.
+  workflow_dispatch:
 
 # Successive pushes to one PR cancel the previous run.
 concurrency:
@@ -53,7 +57,7 @@ jobs:
   # Drift alarm. Goes red with no code change when a regulatory review date passes.
   staleness:
     name: regulatory review dates
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
