@@ -21,12 +21,25 @@ places, and nothing downstream catches it.
 from __future__ import annotations
 
 import ast
+import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-__all__ = ["Finding", "UnparseableSource", "scan_file", "scan_source"]
+__all__ = [
+    "Finding",
+    "FixResult",
+    "RefusedTarget",
+    "StaleFindings",
+    "UnparseableSource",
+    "UnsafeEdit",
+    "apply_fix",
+    "read_source",
+    "scan_file",
+    "scan_source",
+]
 
 #: Tokens that suggest money or an identifiable person, in a function or
 #: parameter name.
@@ -55,6 +68,10 @@ BANK_CLIENT_MODULES: Final[frozenset[str]] = frozenset(
 )
 
 _DECORATOR_MARKER: Final = "regulated_tool"
+
+
+class RefusedTarget(Exception):
+    """The file is not something this tool may rewrite in place."""
 
 
 class UnparseableSource(Exception):
@@ -235,8 +252,26 @@ def scan_source(source: str, path: Path) -> list[Finding]:
     return findings
 
 
+def read_source(path: Path) -> str:
+    """Read a source file, or refuse it clearly.
+
+    ``utf-8-sig`` so a byte-order mark is stripped rather than reaching the
+    parser: a BOM-prefixed file is legal Python, and raising UnparseableSource
+    on it hard-fails CI on a file that is fine. A genuinely non-UTF-8 file is
+    refused by name instead of escaping as a bare UnicodeDecodeError.
+    """
+    raw = path.read_bytes()
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise RefusedTarget(
+            f"{path} is not UTF-8 ({exc.reason}); this tool does not re-encode "
+            "source files"
+        ) from exc
+
+
 def scan_file(path: Path) -> list[Finding]:
-    return scan_source(path.read_text(), path)
+    return scan_source(read_source(path), path)
 
 
 # ---------------------------------------------------------------------------
@@ -306,28 +341,56 @@ def _function_names(source: str, path: Path) -> set[str]:
     return out
 
 
-def _import_insert_index(lines: list[str]) -> int:
-    """After the module docstring and any __future__ import, before the rest."""
-    index = 0
-    if lines and lines[0].lstrip().startswith(('"""', "'''")):
-        quote = lines[0].lstrip()[:3]
-        if lines[0].count(quote) >= 2:
-            index = 1
-        else:
-            for i in range(1, len(lines)):
-                index = i + 1
-                if quote in lines[i]:
-                    break
-    for i in range(index, len(lines)):
-        if "__future__" in lines[i]:
-            index = i + 1
-    return index
+def _import_insert_index(source: str, lines: list[str]) -> int:
+    """Where new imports may legally go: after any shebang, encoding cookie,
+    module docstring, and every ``__future__`` import.
 
+    Derived from the parsed tree rather than by hunting for the substring
+    ``__future__``. The previous version took the LAST line mentioning it
+    anywhere -- a comment was enough -- and placed the new imports BELOW the
+    decorator that uses them. The file still parsed and still defined the same
+    functions, so both write-path guards reported success, and importing it
+    raised NameError.
+    """
+    index = 0
+    # A shebang must stay on line 1; a PEP 263 cookie within the first two.
+    if lines and lines[0].startswith("#!"):
+        index = 1
+    for i in range(index, min(index + 2, len(lines))):
+        if re.match(r"^#.*coding[:=]", lines[i]):
+            index = i + 1
+
+    body = ast.parse(source).body
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+        and body[0].end_lineno
+    ):
+        index = max(index, body[0].end_lineno)
+    for node in body:
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+            index = max(index, node.end_lineno or node.lineno)
+    return index
 
 def apply_fix(path: Path, findings: list[Finding]) -> FixResult:
     """Insert a classification for each finding. Writes atomically or not at all."""
+    if path.is_symlink():
+        raise RefusedTarget(
+            f"{path} is a symlink. Rewriting it would replace the link with a "
+            "regular file and leave the real source untouched; edit the target."
+        )
+    if not os.access(path, os.W_OK):
+        raise RefusedTarget(
+            f"{path} is read-only. An atomic rename only needs a writable "
+            "directory, so this would have succeeded silently -- and read-only "
+            "usually means do not touch."
+        )
+
     original = path.read_bytes()
-    text = original.decode()
+    mode = path.stat().st_mode
+    text = read_source(path)
     newline = "\r\n" if "\r\n" in text else "\n"
 
     fresh = [(f.function, f.insert_line) for f in scan_file(path)]
@@ -347,7 +410,7 @@ def apply_fix(path: Path, findings: list[Finding]) -> FixResult:
 
     needed = [i for i in (DECORATOR_IMPORT, CATEGORY_IMPORT) if i not in text]
     if needed:
-        at = _import_insert_index(lines)
+        at = _import_insert_index(text, lines)
         lines[at:at] = needed
 
     modified = newline.join(lines)
@@ -364,9 +427,13 @@ def apply_fix(path: Path, findings: list[Finding]) -> FixResult:
             "nothing written"
         )
 
-    tmp = path.with_name(path.name + ".finagent-tmp")
+    # Preserve the mode: a temp-and-rename otherwise turns a 0o755 script into
+    # a 0o644 file, and it stops being executable. PID in the name so concurrent
+    # runs cannot collide on it.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.finagent-tmp")
     try:
         tmp.write_bytes(modified.encode())
+        os.chmod(tmp, stat.S_IMODE(mode))
         tmp.replace(path)
     finally:
         tmp.unlink(missing_ok=True)

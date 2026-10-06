@@ -174,3 +174,111 @@ class TestPassiveMode:
         before = p.read_bytes()
         linter.scan_file(p)
         assert p.read_bytes() == before
+
+
+class TestImportPlacement:
+    """Imports must land above the decorator that uses them.
+
+    The previous implementation hunted for the substring ``__future__`` and took
+    the last line mentioning it -- a comment sufficed -- putting the imports
+    below the decorator. The file parsed, defined the same functions, and both
+    guards reported success. Importing it raised NameError.
+    """
+
+    def test_a_later_mention_of_future_does_not_move_the_imports(
+        self, tmp_path: Path
+    ) -> None:
+        p = tmp_path / "m.py"
+        p.write_text(
+            "from decimal import Decimal\n\n\n"
+            "def transfer(amount: Decimal) -> None:\n"
+            "    pass  # kept for parity with the old __future__-annotated module\n"
+        )
+        _fix(p)
+        body = p.read_text()
+        assert body.index("import regulated_tool") < body.index("@regulated_tool(")
+
+    def test_imports_land_below_a_shebang(self, tmp_path: Path) -> None:
+        p = tmp_path / "m.py"
+        p.write_text(
+            "#!/usr/bin/env python3\n"
+            "from decimal import Decimal\n\n\n"
+            "def transfer(amount: Decimal) -> None:\n    pass\n"
+        )
+        _fix(p)
+        assert p.read_text().splitlines()[0] == "#!/usr/bin/env python3"
+
+    def test_imports_land_below_a_real_future_import(self, tmp_path: Path) -> None:
+        p = tmp_path / "m.py"
+        p.write_text(
+            "from __future__ import annotations\n"
+            "from decimal import Decimal\n\n\n"
+            "def transfer(amount: Decimal) -> None:\n    pass\n"
+        )
+        _fix(p)
+        body = p.read_text()
+        assert body.index("__future__") < body.index("import regulated_tool")
+
+    def test_the_result_actually_imports(self, tmp_path: Path) -> None:
+        """The guards check that the file parses and defines the same functions.
+        Neither notices an import placed below its use. This does."""
+        import subprocess
+        import sys
+
+        p = tmp_path / "m.py"
+        p.write_text(
+            "from decimal import Decimal\n\n\n"
+            "def transfer(amount: Decimal) -> None:\n"
+            "    pass  # a comment mentioning __future__\n"
+        )
+        _fix(p)
+        done = subprocess.run(
+            [sys.executable, "-c", f"import runpy; runpy.run_path({str(p)!r})"],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).resolve().parents[1],
+        )
+        assert done.returncode == 0, done.stderr
+
+
+class TestFileIdentity:
+    def test_refuses_a_read_only_file(self, tmp_path: Path) -> None:
+        """An atomic rename only needs a writable directory, so this previously
+        succeeded silently. Read-only usually means do not touch."""
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        p.chmod(0o444)
+        try:
+            with pytest.raises(linter.RefusedTarget, match="read-only"):
+                _fix(p)
+            assert p.read_text() == SIMPLE
+        finally:
+            p.chmod(0o644)
+
+    def test_refuses_a_symlink(self, tmp_path: Path) -> None:
+        """Rewriting it replaced the link with a regular file and left the real
+        source untouched."""
+        real = tmp_path / "real.py"
+        real.write_text(SIMPLE)
+        link = tmp_path / "link.py"
+        link.symlink_to(real)
+        with pytest.raises(linter.RefusedTarget, match="symlink"):
+            _fix(link)
+        assert link.is_symlink()
+        assert real.read_text() == SIMPLE
+
+    def test_preserves_the_executable_bit(self, tmp_path: Path) -> None:
+        """A temp-and-rename otherwise turns a 0o755 script into a 0o644 file."""
+        import stat as _stat
+
+        p = tmp_path / "m.py"
+        p.write_text("#!/usr/bin/env python3\n" + SIMPLE)
+        p.chmod(0o755)
+        _fix(p)
+        assert _stat.S_IMODE(p.stat().st_mode) == 0o755
+
+    def test_refuses_a_non_utf8_file(self, tmp_path: Path) -> None:
+        p = tmp_path / "m.py"
+        p.write_bytes(b"# -*- coding: latin-1 -*-\n# caf\xe9\n" + SIMPLE.encode())
+        with pytest.raises(linter.RefusedTarget, match="not UTF-8"):
+            _fix(p)
