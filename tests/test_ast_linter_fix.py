@@ -301,3 +301,77 @@ class TestFileIdentity:
             "the file was modified in place; a reader could observe a "
             "half-written source file"
         )
+
+
+class TestImportDetection:
+    def test_a_docstring_mentioning_the_import_does_not_suppress_it(
+        self, tmp_path: Path
+    ) -> None:
+        """`if line not in text` is a substring test, and the gate's own error
+        message tells developers to write exactly this example. Neither import
+        was inserted; the decorator was; the file parsed with the same function
+        set and raised NameError on import."""
+        p = tmp_path / "m.py"
+        p.write_text(
+            '"""Payments helpers.\n\n'
+            "    from finagent_safeguard.core.decorators import regulated_tool\n"
+            "    from finagent_safeguard.taxonomy.policies import FinancialCategory\n"
+            '"""\n'
+            "from decimal import Decimal\n\n\n"
+            "def transfer(amount: Decimal) -> None:\n    pass\n"
+        )
+        _fix(p)
+        import subprocess
+        import sys
+
+        done = subprocess.run(
+            [sys.executable, "-c", f"import runpy; runpy.run_path({str(p)!r})"],
+            capture_output=True, text=True, cwd=Path(__file__).resolve().parents[1],
+        )
+        assert done.returncode == 0, done.stderr
+
+    def test_an_aliased_existing_import_is_not_duplicated(self, tmp_path: Path) -> None:
+        p = tmp_path / "m.py"
+        p.write_text(
+            "from finagent_safeguard.core.decorators import regulated_tool\n"
+            "from finagent_safeguard.taxonomy.policies import FinancialCategory\n"
+            "from decimal import Decimal\n\n\n"
+            "def transfer(amount: Decimal) -> None:\n    pass\n"
+        )
+        _fix(p)
+        assert p.read_text().count("import regulated_tool") == 1
+
+
+class TestPartialFindings:
+    def test_a_subset_of_findings_may_be_applied(self, tmp_path: Path) -> None:
+        """Exact list equality meant a developer who inspected three findings
+        and accepted two could not express that."""
+        p = tmp_path / "m.py"
+        p.write_text(
+            "from decimal import Decimal\n\n\n"
+            "def one(amount: Decimal) -> None:\n    pass\n\n\n"
+            "def two(iban: str) -> None:\n    pass\n"
+        )
+        findings = linter.scan_file(p)
+        result = linter.apply_fix(p, [findings[1]])
+        assert result.functions == ["two"]
+        assert p.read_text().count("@regulated_tool(") == 1
+
+    def test_an_empty_list_is_a_no_op_not_an_error(self, tmp_path: Path) -> None:
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        assert linter.apply_fix(p, []).inserted == 0
+        assert p.read_text() == SIMPLE
+
+    def test_a_content_change_is_detected_even_when_lines_are_unchanged(
+        self, tmp_path: Path
+    ) -> None:
+        """Comparing names and line numbers cannot see an edit inside a function
+        body, so a concurrent save was silently overwritten."""
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        findings = linter.scan_file(p)
+        p.write_text(SIMPLE.replace("    pass", "    audit()"))
+        with pytest.raises(linter.StaleFindings):
+            linter.apply_fix(p, findings)
+        assert "audit()" in p.read_text()

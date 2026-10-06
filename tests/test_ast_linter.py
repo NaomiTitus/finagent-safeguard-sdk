@@ -268,3 +268,67 @@ class TestEncoding:
             b"def transfer(amount: Decimal) -> None:\n    pass\n"
         )
         assert [f.function for f in linter.scan_file(p)] == ["transfer"]
+
+
+class TestRuntimeDiscardedStubs:
+    def test_an_overload_stub_is_not_flagged(self, tmp_path: Path) -> None:
+        """typing.overload discards the stub at runtime, so a decorator inserted
+        there never executes -- and the file then re-scans clean, reporting
+        classified while the live implementation is bare. The tool would be
+        manufacturing the invisible false negative it exists to prevent."""
+        found = _findings(
+            tmp_path,
+            "from decimal import Decimal\nfrom typing import overload\n\n\n"
+            "@overload\n"
+            "def fmt(v: Decimal) -> str: ...\n"
+            "@overload\n"
+            "def fmt(v: int) -> str: ...\n"
+            "def fmt(v):\n    return str(v)\n",
+        )
+        assert [f.function for f in found] == []
+
+
+class TestInsertedCategory:
+    """The category written into a developer's source had no test at all, and
+    no mutation row. It mapped every signal to payments, with a raw-substring
+    override for personal data."""
+
+    def test_personal_data_gets_the_gdpr_category(self, tmp_path: Path) -> None:
+        found = _findings(tmp_path, "def store(ssn: str, dob: str, phone: str) -> None:\n    pass\n")
+        assert found[0].category == "GDPR_PII_PROCESSING"
+
+    def test_money_gets_the_payments_category(self, tmp_path: Path) -> None:
+        found = _findings(
+            tmp_path, "from decimal import Decimal\n\n\ndef settle(amount: Decimal) -> None:\n    pass\n"
+        )
+        assert found[0].category == "PSD2_PAYMENT_EXECUTION"
+
+    def test_a_lookalike_does_not_get_the_gdpr_category(self, tmp_path: Path) -> None:
+        """`expand_balance_window` was labelled GDPR because "expand" contains
+        "pan"."""
+        found = _findings(
+            tmp_path,
+            "from decimal import Decimal\n\n\n"
+            "def expand_balance_window(amount: Decimal) -> None:\n    pass\n",
+        )
+        assert found[0].category == "PSD2_PAYMENT_EXECUTION"
+
+
+class TestBankReachability:
+    def test_a_realistic_module_path_is_recognised(self, tmp_path: Path) -> None:
+        """The marker list held three basenames, one of which existed only in
+        tests/fixtures/."""
+        found = _findings(
+            tmp_path,
+            "from finagent_safeguard.bank.client import BankClient\n\n\n"
+            "def innocuous_sounding_helper(x: str) -> str:\n    return x\n",
+        )
+        assert [f.signal for f in found] == ["bank_client_import"]
+
+
+class TestQuotedAnnotations:
+    def test_a_quoted_forward_reference_is_read(self, tmp_path: Path) -> None:
+        found = _findings(
+            tmp_path, 'def move(src: str, dst: str, value: "Decimal") -> None:\n    pass\n'
+        )
+        assert [f.signal for f in found] == ["type"]

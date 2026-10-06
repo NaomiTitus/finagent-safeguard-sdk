@@ -21,6 +21,7 @@ places, and nothing downstream catches it.
 from __future__ import annotations
 
 import ast
+import hashlib
 import os
 import re
 import stat
@@ -43,18 +44,32 @@ __all__ = [
 
 #: Tokens that suggest money or an identifiable person, in a function or
 #: parameter name.
-NAME_TOKENS: Final[frozenset[str]] = frozenset(
+MONEY_TOKENS: Final[frozenset[str]] = frozenset(
     {
-        # money
         "amount", "iban", "bic", "swift", "payee", "payer", "recipient",
         "transfer", "transfers", "payment", "payments", "balance", "account",
         "card", "pan", "charge", "debit", "credit", "refund", "fee", "price",
         "withdraw", "deposit", "wire", "funds", "settle", "remit",
-        # identifiable people
-        "national_id", "personnummer", "fodselsnummer", "henkilotunnus", "cpr",
-        "ssn", "email", "phone", "address", "dob", "date_of_birth", "customer",
+        "money", "cash", "pay", "transaction", "txn", "currency", "sepa",
+        "beneficiary", "originator", "ledger", "invoice", "payout",
+        "settlement", "salary", "loan", "overdraft",
     }
 )
+
+#: Tokens that suggest an identifiable person. Kept separate from money so the
+#: *category* written into a developer's source is derived from which vocabulary
+#: matched, rather than guessed by a substring test over the function name --
+#: which mapped `store_ssn` to a payments classification and `expand_balance`
+#: to GDPR, because "expand" contains "pan".
+PII_TOKENS: Final[frozenset[str]] = frozenset(
+    {
+        "national_id", "personnummer", "fodselsnummer", "henkilotunnus", "cpr",
+        "ssn", "email", "phone", "address", "dob", "date_of_birth", "customer",
+        "surname", "forename", "passport",
+    }
+)
+
+NAME_TOKENS: Final[frozenset[str]] = MONEY_TOKENS | PII_TOKENS
 
 #: Types that carry money or an account reference. A bare ``str`` is not here:
 #: it would flag everything and a linter that flags everything gets switched off.
@@ -63,8 +78,16 @@ RISKY_ANNOTATIONS: Final[frozenset[str]] = frozenset(
 )
 
 #: Importing any of these means the module can reach the bank.
-BANK_CLIENT_MODULES: Final[frozenset[str]] = frozenset(
-    {"fake_bank", "bank_client", "core_banking"}
+#: Markers that make a module able to reach the bank. Matched against every
+#: component of a dotted import path, not only the last, so
+#: ``finagent_safeguard.bank.client`` is recognised as well as ``bank_client``.
+#:
+#: Known limit, stated rather than hidden: this detects a DIRECT import. A
+#: module that imports a helper which itself reaches the bank is not seen,
+#: because a single-file scan cannot resolve the import graph. Closing that
+#: needs a project-wide pass and is not attempted here.
+BANK_CLIENT_MARKERS: Final[frozenset[str]] = frozenset(
+    {"fake_bank", "bank_client", "core_banking", "bank", "psp", "ledger"}
 )
 
 _DECORATOR_MARKER: Final = "regulated_tool"
@@ -98,6 +121,13 @@ class Finding:
     indent: int
     #: Which signal fired. Reported so a developer can judge a false positive.
     signal: str
+    #: The category --fix would insert. Derived here, where the parameter names
+    #: are in hand, rather than re-guessed from the function name alone.
+    category: str
+    #: SHA-256 of the source this finding describes. Comparing line numbers and
+    #: names is not enough: a concurrent save that preserves both -- an edit
+    #: inside a function body -- would otherwise be silently overwritten.
+    source_sha: str
 
 
 def _words(name: str) -> set[str]:
@@ -128,6 +158,10 @@ def _annotation_names(node: ast.AST) -> set[str]:
             out.add(child.id)
         elif isinstance(child, ast.Attribute):
             out.add(child.attr)
+        elif isinstance(child, ast.Constant) and isinstance(child.value, str):
+            # A quoted forward reference -- common in code avoiding a runtime
+            # import -- is a Constant, so the type signal never saw it.
+            out.update(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", child.value))
     return out
 
 
@@ -166,22 +200,45 @@ def _is_classified(
     return any(_decorator_name(d) in aliases for d in node.decorator_list)
 
 
+def _module_reaches_bank(dotted: str) -> bool:
+    return bool(set(dotted.split(".")) & BANK_CLIENT_MARKERS)
+
+
 def _reaches_bank(tree: ast.AST) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module:
-            if node.module.rsplit(".", 1)[-1] in BANK_CLIENT_MODULES:
+            if _module_reaches_bank(node.module):
                 return True
         elif isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name.rsplit(".", 1)[-1] in BANK_CLIENT_MODULES:
-                    return True
+            if any(_module_reaches_bank(a.name) for a in node.names):
+                return True
     return False
+
+
+def _category_for(names: set[str]) -> str:
+    """Payments unless the identifiers point at a person."""
+    if any(_matches_tokens(n, PII_TOKENS) for n in names):
+        return "GDPR_PII_PROCESSING"
+    return "PSD2_PAYMENT_EXECUTION"
+
+
+def _is_runtime_discarded(
+    node: ast.FunctionDef | ast.AsyncFunctionDef, aliases: set[str]
+) -> bool:
+    """True for a stub whose decorator never runs.
+
+    ``typing.overload`` discards the stub at runtime, so a decorator inserted
+    there never executes -- and the file then re-scans clean, reporting
+    classified while the live implementation is bare. The tool would be
+    manufacturing the exact invisible false negative it exists to prevent.
+    """
+    return any(_decorator_name(d) == "overload" for d in node.decorator_list)
 
 
 def _signal_for(
     node: ast.FunctionDef | ast.AsyncFunctionDef, *, bank: bool
-) -> str | None:
-    """Which signal fires for this function, if any. Order is reporting order."""
+) -> tuple[str, str] | None:
+    """Which signal fires, and which category it implies. None if neither."""
     args = node.args
     all_args = [
         *args.posonlyargs, *args.args, *args.kwonlyargs,
@@ -190,17 +247,17 @@ def _signal_for(
     ]
     names = {node.name, *(a.arg for a in all_args)}
     if any(_matches_tokens(name, NAME_TOKENS) for name in names):
-        return "name"
+        return "name", _category_for(names)
 
     annotated = [a.annotation for a in all_args if a.annotation]
     if node.returns is not None:
         annotated.append(node.returns)
     for annotation in annotated:
         if _annotation_names(annotation) & RISKY_ANNOTATIONS:
-            return "type"
+            return "type", _category_for(names)
 
     if bank and not node.name.startswith("_"):
-        return "bank_client_import"
+        return "bank_client_import", _category_for(names)
     return None
 
 
@@ -212,6 +269,7 @@ def scan_source(source: str, path: Path) -> list[Finding]:
         raise UnparseableSource(f"{path}: {exc}") from exc
 
     bank = _reaches_bank(tree)
+    digest = hashlib.sha256(source.encode()).hexdigest()
     lines = source.splitlines()
     findings: list[Finding] = []
 
@@ -222,9 +280,12 @@ def scan_source(source: str, path: Path) -> list[Finding]:
             if isinstance(child, ast.ClassDef):
                 walk(child, f"{prefix}{child.name}.")
             elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if not _is_classified(child, aliases):
-                    signal = _signal_for(child, bank=bank)
-                    if signal is not None:
+                if not _is_classified(child, aliases) and not _is_runtime_discarded(
+                    child, aliases
+                ):
+                    matched = _signal_for(child, bank=bank)
+                    if matched is not None:
+                        signal, category = matched
                         line = min(
                             [child.lineno, *(d.lineno for d in child.decorator_list)]
                         )
@@ -236,6 +297,8 @@ def scan_source(source: str, path: Path) -> list[Finding]:
                                 insert_line=line,
                                 indent=len(text) - len(text.lstrip()),
                                 signal=signal,
+                                category=category,
+                                source_sha=digest,
                             )
                         )
                 walk(child, f"{prefix}{child.name}.")
@@ -296,16 +359,6 @@ CATEGORY_IMPORT: Final = (
 
 #: Which category each signal suggests. The linter proposes; it does not decide.
 #: Every inserted line carries a TODO so the developer must look at it, which is
-#: what keeps "never leave a file in a state the developer did not inspect" true.
-_SIGNAL_CATEGORY: Final[dict[str, str]] = {
-    "name": "PSD2_PAYMENT_EXECUTION",
-    "type": "PSD2_PAYMENT_EXECUTION",
-    "bank_client_import": "PSD2_PAYMENT_EXECUTION",
-}
-
-_PII_TOKENS: Final = frozenset(
-    {"national_id", "personnummer", "fodselsnummer", "henkilotunnus", "cpr", "pan"}
-)
 
 
 class UnsafeEdit(Exception):
@@ -323,11 +376,8 @@ class FixResult:
 
 
 def _render_decorator(finding: Finding) -> str:
-    category = _SIGNAL_CATEGORY[finding.signal]
-    if any(token in finding.function.lower() for token in _PII_TOKENS):
-        category = "GDPR_PII_PROCESSING"
     return (
-        f"@regulated_tool(FinancialCategory.{category})"
+        f"@regulated_tool(FinancialCategory.{finding.category})"
         f"  # TODO(finagent): inserted by linter from the {finding.signal!r} "
         "signal; confirm the category"
     )
@@ -374,6 +424,30 @@ def _import_insert_index(source: str, lines: list[str]) -> int:
             index = max(index, node.end_lineno or node.lineno)
     return index
 
+def _missing_imports(source: str) -> list[str]:
+    """Which import lines the module still needs, decided from the parsed tree.
+
+    ``if line not in text`` is a substring test, and a module docstring carrying
+    the worked example -- precisely what the gate's error message tells
+    developers to write -- made it a hit. Neither import was inserted, the
+    decorator was, the result parsed with the same function set, both write
+    guards reported success, and importing the file raised NameError. Same bug
+    class as the one fixed in ``_import_insert_index``, five lines below it,
+    and missed.
+    """
+    bound: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                bound.add(alias.asname or alias.name)
+    needed = []
+    if _DECORATOR_MARKER not in bound:
+        needed.append(DECORATOR_IMPORT)
+    if "FinancialCategory" not in bound:
+        needed.append(CATEGORY_IMPORT)
+    return needed
+
+
 def apply_fix(path: Path, findings: list[Finding]) -> FixResult:
     """Insert a classification for each finding. Writes atomically or not at all."""
     if path.is_symlink():
@@ -388,17 +462,32 @@ def apply_fix(path: Path, findings: list[Finding]) -> FixResult:
             "usually means do not touch."
         )
 
-    original = path.read_bytes()
     mode = path.stat().st_mode
+    # Read once, and derive the freshness check from THAT text. Reading twice
+    # let a concurrent save land between them: the check re-read the new
+    # content and passed, while the edit applied to the stale copy and the
+    # developer's save was silently discarded. `original` was also read here
+    # and never used.
     text = read_source(path)
     newline = "\r\n" if "\r\n" in text else "\n"
+    fresh = scan_source(text, path)
 
-    fresh = [(f.function, f.insert_line) for f in scan_file(path)]
-    if fresh != [(f.function, f.insert_line) for f in findings]:
+    # A subset, in any order. Exact list equality meant a developer who
+    # inspected five findings and accepted three could not express that, and
+    # apply_fix(path, []) raised "changed since it was scanned" about a file
+    # that had not changed.
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    stale = [f.function for f in findings if f.source_sha != digest]
+    if stale:
         raise StaleFindings(
-            f"{path} changed since it was scanned; re-run rather than writing "
-            "edits that describe a file that no longer exists"
+            f"{path} changed since it was scanned (findings for {stale} describe "
+            "different content). Re-scan rather than writing edits against a file "
+            "that no longer exists."
         )
+    known = {(f.function, f.insert_line) for f in fresh}
+    unknown = [f.function for f in findings if (f.function, f.insert_line) not in known]
+    if unknown:
+        raise StaleFindings(f"{path}: {unknown} are not findings for this file")
     if not findings:
         return FixResult(inserted=0, functions=[])
 
@@ -408,7 +497,7 @@ def apply_fix(path: Path, findings: list[Finding]) -> FixResult:
     for finding in sorted(findings, key=lambda f: f.insert_line, reverse=True):
         lines.insert(finding.insert_line - 1, " " * finding.indent + _render_decorator(finding))
 
-    needed = [i for i in (DECORATOR_IMPORT, CATEGORY_IMPORT) if i not in text]
+    needed = _missing_imports(text)
     if needed:
         at = _import_insert_index(text, lines)
         lines[at:at] = needed
