@@ -11,6 +11,8 @@ Rows correspond to docs/mutation-list.md.
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -38,14 +40,14 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
     ),
     "A3": (
         AGENT,
-        '        "    @regulated_tool(FinancialCategory.PSD2_PAYMENT_EXECUTION)\n"',
+        '        "    @regulated_tool(FinancialCategory.PSD2_PAYMENT_EXECUTION)\\n"',
         '        ""',
         "test_error_names_the_remedy",
         "remove the worked decorator example from the error message",
     ),
     "A3b": (
         AGENT,
-        '        "Classify each one before constructing the agent:\n\n"',
+        '        "Classify each one before constructing the agent:\\n\\n"',
         '        ""',
         "(none expected)",
         "remove only the lead-in sentence, leaving the example",
@@ -165,11 +167,28 @@ BASELINE: dict[str, str] = {
 }
 
 
+def _purge_bytecode(path: Path) -> None:
+    """Drop cached bytecode for the package a mutation touched.
+
+    Belt to PYTHONDONTWRITEBYTECODE's braces: caches written by an earlier run,
+    or by the developer's own imports, are still on disk and still stale.
+    """
+    cache = path.parent / "__pycache__"
+    shutil.rmtree(cache, ignore_errors=True)
+
+
 def run_suite() -> list[str]:
+    # PYTHONDONTWRITEBYTECODE is not optional here. A mutation that preserves
+    # file size -- paragraph="9" for paragraph="2", say -- written and reverted
+    # inside the same second leaves Python's (mtime, size) cache check seeing no
+    # change, so the next run imports bytecode compiled from the MUTATED source.
+    # That silently corrupts the verdict in either direction.
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     out = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/", "-q", "--no-header", "-x", "--tb=no"],
         capture_output=True,
         text=True,
+        env=env,
     ).stdout
     return [ln.split()[1] for ln in out.splitlines() if ln.startswith("FAILED") and len(ln.split()) > 1]
 
@@ -184,10 +203,12 @@ def main(ids: list[str]) -> int:
             print(f"{mid}: SKIP - anchor not found (code moved?)")
             continue
         path.write_text(original.replace(find, repl, 1))
+        _purge_bytecode(path)
         try:
             failures = run_suite()
         finally:
             path.write_text(original)
+            _purge_bytecode(path)
         caught = bool(failures)
         results.append((mid, note, expected, failures, caught))
         print(f"\n{mid}  {note}")
@@ -238,10 +259,12 @@ def check() -> int:
             drift.append(f"{mid}: anchor missing (code moved) - baseline is stale")
             continue
         path.write_text(original.replace(find, repl, 1))
+        _purge_bytecode(path)
         try:
             actual = "caught" if run_suite() else "not_caught"
         finally:
             path.write_text(original)
+            _purge_bytecode(path)
         mark = "ok" if actual == expected else "DRIFT"
         print(f"  {mid:<5} expected={expected:<11} actual={actual:<11} {mark}  {note}")
         if actual != expected:

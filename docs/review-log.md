@@ -318,3 +318,29 @@ handled.
 **For next time.** Run `gh stack init` *before* cutting the first branch of a stack, not
 after. Installing a tool and then not using it is worse than not installing it, because the
 install reads as evidence the tool was used.
+
+---
+
+## 2026-10-06 — F-013: the mutation runner could report a wrong verdict
+
+**What happened.** After a clean `--check` reporting 15/15, the suite failed with
+`32023R1113:5.9.z cites paragraph 9` -- a mutation that was no longer anywhere on disk. The
+source was clean, HEAD was clean, and the loaded module still carried the mutated value.
+
+**Cause.** Stale bytecode. `paragraph="9"` is exactly as long as `paragraph="2"`, and the
+mutate and revert writes landed inside the same second. Python's import cache validates on
+`(mtime, size)`, so neither changed and the interpreter reused a `.pyc` compiled from the
+mutated source.
+
+**Why it matters more than the symptom.** Every mutation verdict taken before this fix is
+suspect in *both* directions: a mutation could read `caught` because stale bytecode still
+held the un-mutated code, or `not_caught` because the revert never reached the interpreter.
+The tool whose job is to verify that tests bite was itself unverified.
+
+**Fix.** `PYTHONDONTWRITEBYTECODE=1` in the subprocess environment, plus an explicit purge of
+the mutated package's `__pycache__` both before and after each run -- belt and braces,
+because a cache written by an earlier run or by the developer's own imports is still on disk
+and still stale. The full baseline was re-run from a cleared cache afterwards; 15/15 stands.
+
+**Shape.** Same as F-010 and F-012: a claim about state taken from a command run earlier
+rather than from the state itself. Here the state was one level below the filesystem.
