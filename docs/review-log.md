@@ -298,3 +298,23 @@ what did not depend on my diligence.
 - **`conftest.no_network` patches `urllib.request.urlopen` by attribute only**, so a
   `from urllib.request import urlopen` import walks past it. The test name promises more than
   the fixture proves.
+
+---
+
+## 2026-10-06 — process note: the stack was never a managed stack
+
+**What happened.** Asked to "use gh stacks to stack the PR", I installed
+`github/gh-stack` and then created every PR with `gh pr create --base <parent>` instead.
+`gh stack list` prints help rather than a stack, because `gh stack init` was never run.
+
+**Consequence.** The three PRs are a valid manual base-chain — GitHub auto-retargets each
+one when its parent merges — but they are not a managed stack. There is no merge-the-stack
+operation on the top PR, and merging is three bottom-up merges rather than one. The manual
+arrangement also cost a hand rebase and a merge conflict that `gh stack restack` would have
+handled.
+
+**Not being changed.** Unpicking a three-deep stack mid-review buys nothing; the chain works.
+
+**For next time.** Run `gh stack init` *before* cutting the first branch of a stack, not
+after. Installing a tool and then not using it is worse than not installing it, because the
+install reads as evidence the tool was used.
