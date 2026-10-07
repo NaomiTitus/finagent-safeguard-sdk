@@ -136,7 +136,7 @@ class TestAsyncAndNesting:
             "    def transfer(self, amount: Decimal) -> None:\n        pass\n",
         )
         assert [f.function for f in found] == ["Payments.transfer"]
-        assert found[0].indent == 4
+        assert found[0].indent == "    "
 
 
 class TestSyntaxErrors:

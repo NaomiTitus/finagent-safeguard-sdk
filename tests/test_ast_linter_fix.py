@@ -399,24 +399,17 @@ class TestVerificationIsNotVacuous:
     what happens on a file with mixed line endings.
     """
 
-    def test_a_decorator_on_the_wrong_function_is_rejected(
-        self, tmp_path: Path
-    ) -> None:
-        """Reproduces the real trigger, not a simulation of it.
+    def test_a_mixed_line_ending_file_is_fixed_correctly(self, tmp_path: Path) -> None:
+        """The case that used to silently label the wrong function.
 
         Detection numbers lines with `ast`, which treats \\n, \\r\\n and \\r as
-        breaks. The writer splits on one newline guessed for the whole file. On
-        a CRLF file containing an LF-only line, every line below that point is
-        off by one, and the decorator lands on the following function while the
-        intended one stays bare.
+        breaks. The writer used to split on one newline guessed for the whole
+        file, so every differing line above the target shifted the insertion
+        point. Now both use the same model.
         """
         p = tmp_path / "m.py"
         p.write_bytes(
             b"from decimal import Decimal\r\n"
-            # Two LF-only lines. One shifts far enough to break syntax, which the
-            # parse check already caught; two produces a misplacement that is
-            # perfectly valid Python -- the case the old name-set check waved
-            # through, and the only one that mattered.
             b"import os\n"
             b"import sys\n"
             b"\r\n"
@@ -428,8 +421,37 @@ class TestVerificationIsNotVacuous:
             b"def render_template(t: str) -> str:\r\n"
             b"    return t\r\n"
         )
+        result = linter.apply_fix(p, linter.scan_file(p))
+        assert result.functions == ["transfer"]
+
+        after = linter.decorators_by_qualname(p.read_text())
+        assert after["transfer"], "the intended function must carry the decorator"
+        assert not after["render_template"], "no other function may be touched"
+
+        raw = p.read_bytes()
+        assert b"import os\n" in raw, "an LF-only line must stay LF"
+        assert b"def transfer(amount: Decimal) -> None:\r\n" in raw, "CRLF must stay CRLF"
+
+    def test_the_guard_still_fires_if_the_line_model_regresses(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Belt and braces. If someone reintroduces a split that disagrees with
+        `ast`, the qualname check must refuse rather than mislabel."""
+        p = tmp_path / "m.py"
+        p.write_bytes(
+            b"from decimal import Decimal\r\n"
+            b"import os\n"
+            b"import sys\n"
+            b"\r\n\r\n"
+            b"def transfer(amount: Decimal) -> None:\r\n    pass\r\n"
+            b"\r\n\r\n"
+            b"def render_template(t: str) -> str:\r\n    return t\r\n"
+        )
         before = p.read_bytes()
-        with pytest.raises(linter.UnsafeEdit, match="landed on"):
+        monkeypatch.setattr(
+            linter, "_split_source_lines", lambda text: text.split("\r\n")
+        )
+        with pytest.raises(linter.UnsafeEdit):
             linter.apply_fix(p, linter.scan_file(p))
         assert p.read_bytes() == before, "nothing may be written when the check fails"
 
@@ -503,3 +525,100 @@ class TestPlanBeforeWrite:
         plan = linter.plan_fix(p, linter.scan_file(p))
         linter.apply_fix(p, linter.scan_file(p))
         assert p.read_bytes() == plan.new_bytes
+
+
+class TestLineModel:
+    """`str.splitlines()` is not the tokenizer's line model, and the difference
+    is where the silent failures live."""
+
+    def test_does_not_split_on_a_form_feed(self) -> None:
+        """ast says `b = 2` is line 2. str.splitlines() makes it line 3, so a
+        decorator aimed at line 2 would land on a bare newline."""
+        src = "a = 1\x0c\nb = 2\n"
+        assert len(linter._split_source_lines(src)) == 2
+        assert len(src.splitlines(keepends=True)) == 3
+
+    def test_does_not_split_on_a_line_separator_in_a_string(self) -> None:
+        src = 'BANNER = "x y"\nb = 2\n'
+        assert len(linter._split_source_lines(src)) == 2
+
+    @pytest.mark.parametrize(
+        "src", ["a\nb\n", "a\r\nb\r\n", "a\rb\r", "a\r\nb\nc\r", "a", ""]
+    )
+    def test_agrees_with_what_ast_counts_as_a_line(self, src: str) -> None:
+        """The oracle that matters: our line count must match the parser's."""
+        import ast as _ast
+
+        body = _ast.parse(src.replace("a", "a = 1").replace("b", "b = 2").replace("c", "c = 3")).body
+        if body:
+            expected = max(node.lineno for node in body)
+            lines = linter._split_source_lines(
+                src.replace("a", "a = 1").replace("b", "b = 2").replace("c", "c = 3")
+            )
+            assert len(lines) >= expected
+
+    def test_round_trips_any_source_byte_exactly(self) -> None:
+        for src in ["a\nb\n", "a\r\nb\n", "x\x0cy\n", "no trailing newline", ""]:
+            assert "".join(linter._split_source_lines(src)) == src or src == ""
+
+
+class TestHostileCorpus:
+    """Every file shape that has broken this tool, kept as a permanent corpus.
+
+    The rule each case asserts is the same: either fix it correctly, or refuse
+    and leave the file byte-identical. Never write something wrong.
+    """
+
+    CASES: dict[str, bytes] = {
+        "plain_lf": b"def transfer(amount):\n    pass\n",
+        "all_crlf": b"def transfer(amount):\r\n    pass\r\n",
+        "all_cr": b"def transfer(amount):\r    pass\r",
+        "mixed_crlf_lf": (
+            b"import os\nimport sys\n\r\n\r\n"
+            b"def transfer(amount):\r\n    pass\r\n\r\n\r\n"
+            b"def other(t):\r\n    return t\r\n"
+        ),
+        "form_feed": b"def other(t):\n    return t\n\x0c\ndef transfer(amount):\n    pass\n",
+        "line_sep_in_string": b'BANNER = "x\xe2\x80\xa8y"\ndef transfer(amount):\n    pass\n',
+        "utf8_bom": b"\xef\xbb\xbfdef transfer(amount):\n    pass\n",
+        "tab_indent": b"class P:\n\tdef transfer(self, amount):\n\t\tpass\n",
+        "no_trailing_newline": b"def transfer(amount):\n    pass",
+        "non_ascii_identifier": b"r\xc3\xa4kning = 1\ndef transfer(amount):\n    pass\n",
+        "docstring_names_import": (
+            b'"""Doc.\n\n    from finagent_safeguard.core.decorators import regulated_tool\n"""\n'
+            b"def transfer(amount):\n    pass\n"
+        ),
+    }
+
+    @pytest.mark.parametrize("label", sorted(CASES))
+    def test_fixes_correctly_or_refuses_without_writing(
+        self, tmp_path: Path, label: str
+    ) -> None:
+        import ast as _ast
+
+        p = tmp_path / "m.py"
+        p.write_bytes(self.CASES[label])
+        before = p.read_bytes()
+
+        try:
+            result = linter.apply_fix(p, linter.scan_file(p))
+        except (linter.RefusedTarget, linter.UnsafeEdit, linter.StaleFindings):
+            assert p.read_bytes() == before, "refused, but wrote anyway"
+            return
+
+        after = p.read_bytes()
+        _ast.parse(after.decode("utf-8-sig"))
+
+        decorated = {
+            q for q, d in linter.decorators_by_qualname(after.decode("utf-8-sig")).items() if d
+        }
+        assert decorated == set(result.functions), (
+            f"reported {result.functions} but {decorated} carry the decorator"
+        )
+        assert after.startswith(b"\xef\xbb\xbf") == before.startswith(b"\xef\xbb\xbf")
+
+    def test_a_tab_indented_method_is_indented_with_a_tab(self, tmp_path: Path) -> None:
+        p = tmp_path / "m.py"
+        p.write_bytes(self.CASES["tab_indent"])
+        linter.apply_fix(p, linter.scan_file(p))
+        assert "\t@regulated_tool(" in p.read_text()

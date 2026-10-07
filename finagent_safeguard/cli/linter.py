@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import difflib
+import io
 import hashlib
 import os
 import re
@@ -120,9 +121,11 @@ class Finding:
     #: existing decorator's line when there are any, not the ``def`` line, so a
     #: new decorator does not land inside an existing stack.
     insert_line: int
-    #: Leading spaces of that line, so an inserted decorator lines up with a
-    #: method inside a class.
-    indent: int
+    #: The literal leading whitespace of that line, copied rather than counted.
+    #: Storing a count and re-emitting it as spaces destroyed the difference
+    #: between a tab and a space, so a tab-indented class produced
+    #: "inconsistent use of tabs and spaces" and had to be refused.
+    indent: str
     #: Which signal fired. Reported so a developer can judge a false positive.
     signal: str
     #: The category --fix would insert. Derived here, where the parameter names
@@ -294,12 +297,13 @@ def scan_source(source: str, path: Path) -> list[Finding]:
                             [child.lineno, *(d.lineno for d in child.decorator_list)]
                         )
                         text = lines[line - 1]
+                        leading = text[: len(text) - len(text.lstrip(" \t\x0c"))]
                         findings.append(
                             Finding(
                                 path=path,
                                 function=f"{prefix}{child.name}",
                                 insert_line=line,
-                                indent=len(text) - len(text.lstrip()),
+                                indent=leading,
                                 signal=signal,
                                 category=category,
                                 source_sha=digest,
@@ -428,6 +432,30 @@ def _import_insert_index(source: str, lines: list[str]) -> int:
             index = max(index, node.end_lineno or node.lineno)
     return index
 
+def _split_source_lines(text: str) -> list[str]:
+    """Split source into lines the way Python's tokenizer does, keeping endings.
+
+    The tokenizer treats ``\\n``, ``\\r\\n`` and ``\\r`` as line breaks and nothing
+    else, which is exactly what ``io.StringIO(newline="")`` reproduces.
+
+    ``str.splitlines()`` is NOT equivalent and is a trap here: it also splits on
+    ``\\x0b \\x0c \\x1c \\x1d \\x1e \\x85 \\u2028 \\u2029``. A form feed in a banner
+    comment, or a line separator inside a string literal, would make the line
+    array disagree with ``ast``'s line numbers -- turning a loud, frequent bug
+    into a silent, rare one. CPython hit this too: ``ast._splitlines_no_ff``
+    exists for the same reason.
+    """
+    return io.StringIO(text, newline="").readlines() or [""]
+
+
+def _terminator(line: str) -> str:
+    """The line ending of one line, or empty for a file with no final newline."""
+    for candidate in ("\r\n", "\n", "\r"):
+        if line.endswith(candidate):
+            return candidate
+    return ""
+
+
 def _missing_imports(source: str) -> list[str]:
     """Which import lines the module still needs, decided from the parsed tree.
 
@@ -526,7 +554,6 @@ def plan_fix(path: Path, findings: list[Finding]) -> FixPlan:
     raw = path.read_bytes()
     bom = b"\xef\xbb\xbf" if raw.startswith(b"\xef\xbb\xbf") else b""
     text = read_source(path)
-    newline = "\r\n" if "\r\n" in text else "\n"
     fresh = scan_source(text, path)
 
     digest = hashlib.sha256(text.encode()).hexdigest()
@@ -545,16 +572,31 @@ def plan_fix(path: Path, findings: list[Finding]) -> FixPlan:
     if not findings:
         return FixPlan(path=path, new_bytes=raw, diff="", functions=[])
 
-    lines = text.split(newline)
+    # Split the way Python's own tokenizer does, and keep each line's ending.
+    #
+    # The previous version guessed ONE newline for the whole file and split on
+    # it. On a file with mixed endings -- post-merge, codegen, a Windows-authored
+    # patch -- every differing line above the target shifted the insertion point,
+    # so the decorator landed on the following function while the intended one
+    # stayed bare. See _split_source_lines for why str.splitlines() is not the
+    # fix either.
+    lines = _split_source_lines(text)
     for finding in sorted(findings, key=lambda f: f.insert_line, reverse=True):
+        # Borrow the terminator of the line being pushed down, so the inserted
+        # line matches its neighbours rather than a file-wide guess.
+        term = _terminator(lines[finding.insert_line - 1])
         lines.insert(
-            finding.insert_line - 1, " " * finding.indent + _render_decorator(finding)
+            finding.insert_line - 1,
+            finding.indent + _render_decorator(finding) + term,
         )
     needed = _missing_imports(text)
     if needed:
         at = _import_insert_index(text, lines)
-        lines[at:at] = needed
-    modified = newline.join(lines)
+        term = _terminator(lines[at]) if at < len(lines) else "\n"
+        lines[at:at] = [line + term for line in needed]
+    # Join with nothing. Every original byte is carried through untouched,
+    # because no line was ever stripped of its ending.
+    modified = "".join(lines)
 
     try:
         after = decorators_by_qualname(modified)
@@ -584,8 +626,8 @@ def plan_fix(path: Path, findings: list[Finding]) -> FixPlan:
 
     diff = "".join(
         difflib.unified_diff(
-            raw.decode("utf-8-sig").splitlines(keepends=True),
-            new_bytes.decode("utf-8-sig").splitlines(keepends=True),
+            _split_source_lines(raw.decode("utf-8-sig")),
+            _split_source_lines(new_bytes.decode("utf-8-sig")),
             fromfile=f"a/{path.name}",
             tofile=f"b/{path.name}",
         )
