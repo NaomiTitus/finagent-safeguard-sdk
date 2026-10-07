@@ -344,3 +344,43 @@ and still stale. The full baseline was re-run from a cleared cache afterwards; 1
 
 **Shape.** Same as F-010 and F-012: a claim about state taken from a command run earlier
 rather than from the state itself. Here the state was one level below the filesystem.
+
+---
+
+## 2026-10-07 — F-014: the same self-inflicted loss, a third time
+
+**What happened.** Mid-way through building Phase 1, I ran
+`git checkout -- finagent_safeguard/cli/linter.py` to undo a one-off diagnostic mutation. The
+Phase 1 implementation was uncommitted. It was destroyed. Six tests went red, and for a moment
+I suspected a leaked mutation rather than my own command.
+
+**This is the third occurrence.** F-010 and F-012 are the same command, the same cause, the
+same loss. After F-010 I wrote down "commit before mutating". After F-012 I wrote it down
+again, as two numbered rules. Both times the lesson was recorded and neither time did it
+change the behaviour.
+
+**The conclusion worth drawing is about controls, not about care.** A written lesson is not a
+control. It has now failed twice in a row, which is enough evidence to stop writing it a third
+time and change the mechanism instead.
+
+**The rule, stated so it can be followed mechanically rather than remembered:**
+
+> Never run `git checkout -- <file>` on a file with uncommitted work in it.
+>
+> To undo an experimental edit, use `tools/run_mutations.py`, which holds the original in
+> memory and restores from that. For a one-off experiment the runner does not cover, copy the
+> file to a temp path first and restore from the copy. `git checkout` restores from the last
+> commit, which is precisely the wrong source when the work is not committed.
+
+**And the reason it keeps happening, named honestly.** `git checkout --` *feels* like an undo.
+It is not. It is "replace this file with the committed version", which is identical to undo
+only when there is nothing uncommitted — the one condition that is false every time I reach
+for it mid-task.
+
+### Related: two mutation rows recorded as `not_caught` on purpose
+
+`L19` (the byte-envelope guard) and `L21` (the function-set check) are defence in depth. Their
+cases are each caught by a stronger check first, so neither has a test that depends on it
+alone. Both are baselined `not_caught` rather than given a contrived test, on the principle
+that a row reading `caught` because of an unrelated assertion is worse than one that admits it
+is a backstop. CI reports both on every run, so neither can be quietly forgotten.
