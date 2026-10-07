@@ -622,3 +622,44 @@ class TestHostileCorpus:
         p.write_bytes(self.CASES["tab_indent"])
         linter.apply_fix(p, linter.scan_file(p))
         assert "\t@regulated_tool(" in p.read_text()
+
+
+class TestQualnameCheckAlone:
+    """The qualname check must be load-bearing on its own.
+
+    Inserting at the wrong line preserves every original byte, so the byte
+    guard cannot see it and the file still parses. Only comparing which
+    function carries which decorator catches this, which is exactly the hole in
+    the old bare-name-set check.
+    """
+
+    def test_an_insertion_at_the_wrong_line_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        src = (
+            "from decimal import Decimal\n\n\n"
+            "def transfer(amount: Decimal) -> None:\n    pass\n\n\n"
+            "def render_template(t: str) -> str:\n    return t\n"
+        )
+        p = tmp_path / "m.py"
+        p.write_text(src)
+        before = p.read_bytes()
+
+        real = linter.scan_source
+
+        def shifted(text: str, path: Path) -> list[linter.Finding]:
+            import dataclasses
+
+            return [
+                dataclasses.replace(f, insert_line=f.insert_line + 4)
+                for f in real(text, path)
+            ]
+
+        # Patch both the caller's scan and plan_fix's freshness scan, so the
+        # wrong line is internally consistent and only the qualname check can
+        # object.
+        monkeypatch.setattr(linter, "scan_source", shifted)
+
+        with pytest.raises(linter.UnsafeEdit, match="landed on"):
+            linter.apply_fix(p, linter.scan_file(p))
+        assert p.read_bytes() == before

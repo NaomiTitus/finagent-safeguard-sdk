@@ -114,7 +114,7 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         LINT,
         '    if changed != intended:',
         '    if False:',
-        "test_a_decorator_on_the_wrong_function_is_rejected",
+        "test_an_insertion_at_the_wrong_line_is_rejected",
         "skip the qualname check, so a decorator landing on the wrong function "
         "is written and reported as success",
     ),
@@ -238,6 +238,34 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "test_aborts_when_the_reparse_changes_the_function_set",
         "skip the function-set check",
     ),
+    "L22": (
+        LINT,
+        '    return io.StringIO(text, newline="").readlines() or [""]',
+        "    return text.splitlines(keepends=True) or ['']",
+        "test_does_not_split_on_a_form_feed",
+        "split with str.splitlines, which breaks on form feeds and line separators the tokenizer ignores",
+    ),
+    "L23": (
+        LINT,
+        '        term = _terminator(lines[finding.insert_line - 1])',
+        '        term = "\\n"',
+        "test_fixes_correctly_or_refuses_without_writing[all_crlf]",
+        "hard-code the inserted line ending instead of matching its neighbour",
+    ),
+    "L24": (
+        LINT,
+        '            finding.indent + _render_decorator(finding) + term,',
+        '            " " * len(finding.indent) + _render_decorator(finding) + term,',
+        "test_a_tab_indented_method_is_indented_with_a_tab",
+        "re-emit indentation as spaces, destroying tabs",
+    ),
+    "L25": (
+        LINT,
+        '    modified = "".join(lines)',
+        '    modified = "\\n".join(line.rstrip("\\r\\n") for line in lines)',
+        "test_fixes_correctly_or_refuses_without_writing[mixed_crlf_lf]",
+        "normalise every line ending on join",
+    ),
     "D6": (
         DECOR,
         "    return TOOL_REGISTRY.get(registry_key(func))",
@@ -292,6 +320,10 @@ BASELINE: dict[str, str] = {
     "L19": "not_caught",
     "L20": "caught",
     "L21": "not_caught",
+    "L22": "caught",
+    "L23": "caught",
+    "L24": "caught",
+    "L25": "caught",
 }
 
 
