@@ -388,3 +388,118 @@ class TestPartialFindings:
         with pytest.raises(linter.StaleFindings, match="not findings for this file"):
             linter.apply_fix(p, [impostor])
         assert p.read_text() == SIMPLE
+
+
+class TestVerificationIsNotVacuous:
+    """The old check compared a set of bare function names before and after.
+
+    Adding a decorator never changes a function's name, so that check returned
+    the same answer whatever the edit did, as long as the file still parsed. It
+    could not see a decorator landing on the wrong function -- which is exactly
+    what happens on a file with mixed line endings.
+    """
+
+    def test_a_decorator_on_the_wrong_function_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """Reproduces the real trigger, not a simulation of it.
+
+        Detection numbers lines with `ast`, which treats \\n, \\r\\n and \\r as
+        breaks. The writer splits on one newline guessed for the whole file. On
+        a CRLF file containing an LF-only line, every line below that point is
+        off by one, and the decorator lands on the following function while the
+        intended one stays bare.
+        """
+        p = tmp_path / "m.py"
+        p.write_bytes(
+            b"from decimal import Decimal\r\n"
+            # Two LF-only lines. One shifts far enough to break syntax, which the
+            # parse check already caught; two produces a misplacement that is
+            # perfectly valid Python -- the case the old name-set check waved
+            # through, and the only one that mattered.
+            b"import os\n"
+            b"import sys\n"
+            b"\r\n"
+            b"\r\n"
+            b"def transfer(amount: Decimal) -> None:\r\n"
+            b"    pass\r\n"
+            b"\r\n"
+            b"\r\n"
+            b"def render_template(t: str) -> str:\r\n"
+            b"    return t\r\n"
+        )
+        before = p.read_bytes()
+        with pytest.raises(linter.UnsafeEdit, match="landed on"):
+            linter.apply_fix(p, linter.scan_file(p))
+        assert p.read_bytes() == before, "nothing may be written when the check fails"
+
+    def test_the_report_names_the_function_that_was_actually_decorated(
+        self, tmp_path: Path
+    ) -> None:
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        result = linter.apply_fix(p, linter.scan_file(p))
+        assert result.functions == ["transfer"]
+        after = linter.decorators_by_qualname(p.read_text())
+        assert after["transfer"], "the reported function must be the decorated one"
+
+    def test_a_method_and_a_function_of_the_same_name_stay_distinct(
+        self, tmp_path: Path
+    ) -> None:
+        """Bare names collapse `transfer` and `Payments.transfer` into one
+        entry, which makes the check half-blind again."""
+        src = (
+            "from decimal import Decimal\n\n\n"
+            "def transfer(amount: Decimal) -> None:\n    pass\n\n\n"
+            "class Payments:\n"
+            "    def transfer(self, amount: Decimal) -> None:\n        pass\n"
+        )
+        qualnames = set(linter.decorators_by_qualname(src))
+        assert qualnames == {"transfer", "Payments.transfer"}
+
+
+class TestByteEnvelope:
+    """Some corruption is invisible to the parser. A dropped byte-order mark
+    produces a file that parses fine, defines the same functions, and is three
+    bytes shorter than the developer left it."""
+
+    def test_a_byte_order_mark_survives(self, tmp_path: Path) -> None:
+        p = tmp_path / "m.py"
+        p.write_bytes(b"\xef\xbb\xbf" + SIMPLE.encode())
+        _fix(p)
+        assert p.read_bytes().startswith(b"\xef\xbb\xbf")
+
+    def test_nothing_outside_the_inserted_lines_changes(self, tmp_path: Path) -> None:
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        before = p.read_bytes()
+        _fix(p)
+        after = p.read_bytes()
+        # Every original byte must still be present, in order.
+        import difflib
+
+        ops = difflib.SequenceMatcher(None, before, after).get_opcodes()
+        assert all(tag in ("equal", "insert") for tag, *_ in ops), (
+            f"bytes were deleted or replaced, not just inserted: {ops}"
+        )
+
+
+class TestPlanBeforeWrite:
+    """--fix should be able to show its work before touching anything."""
+
+    def test_plan_returns_a_diff_and_writes_nothing(self, tmp_path: Path) -> None:
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        before = p.read_bytes()
+        plan = linter.plan_fix(p, linter.scan_file(p))
+        assert "@regulated_tool(" in plan.diff
+        assert plan.diff.startswith("--- ")
+        assert p.read_bytes() == before, "planning must not write"
+
+    def test_the_plan_is_what_gets_written(self, tmp_path: Path) -> None:
+        """The diff a developer approves must be the bytes that land."""
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        plan = linter.plan_fix(p, linter.scan_file(p))
+        linter.apply_fix(p, linter.scan_file(p))
+        assert p.read_bytes() == plan.new_bytes

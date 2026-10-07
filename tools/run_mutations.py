@@ -112,10 +112,11 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
     ),
     "L5": (
         LINT,
-        '    if before != after:',
+        '    if changed != intended:',
         '    if False:',
-        "test_aborts_when_the_reparse_changes_the_function_set",
-        "skip the re-parse verification before writing",
+        "test_a_decorator_on_the_wrong_function_is_rejected",
+        "skip the qualname check, so a decorator landing on the wrong function "
+        "is written and reported as success",
     ),
     "L6": (
         LINT,
@@ -216,6 +217,27 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "test_a_realistic_module_path_is_recognised",
         "match only the last component of a dotted import path",
     ),
+    "L19": (
+        LINT,
+        '    envelope = _only_insertions(raw, new_bytes)',
+        '    envelope = []',
+        "test_a_byte_order_mark_survives",
+        "skip the byte guard, so a dropped BOM is written silently",
+    ),
+    "L20": (
+        LINT,
+        r'    bom = b"\xef\xbb\xbf" if raw.startswith(b"\xef\xbb\xbf") else b""',
+        '    bom = b""',
+        "test_a_byte_order_mark_survives",
+        "stop re-attaching the byte-order mark on write",
+    ),
+    "L21": (
+        LINT,
+        '    if set(before) != set(after):',
+        '    if False:',
+        "test_aborts_when_the_reparse_changes_the_function_set",
+        "skip the function-set check",
+    ),
     "D6": (
         DECOR,
         "    return TOOL_REGISTRY.get(registry_key(func))",
@@ -262,6 +284,14 @@ BASELINE: dict[str, str] = {
     "L16": "caught",
     "L17": "caught",
     "L18": "caught",
+    # L19 and L21 are defence-in-depth. Their cases are caught by a
+    # stronger check first, so neither has a test that depends on it alone.
+    # Recorded honestly rather than given a contrived test: a row that reads
+    # "caught" because of an unrelated assertion is worse than one that admits
+    # it is a backstop.
+    "L19": "not_caught",
+    "L20": "caught",
+    "L21": "not_caught",
 }
 
 

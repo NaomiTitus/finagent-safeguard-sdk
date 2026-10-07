@@ -21,6 +21,7 @@ places, and nothing downstream catches it.
 from __future__ import annotations
 
 import ast
+import difflib
 import hashlib
 import os
 import re
@@ -31,7 +32,10 @@ from typing import Final
 
 __all__ = [
     "Finding",
+    "FixPlan",
     "FixResult",
+    "decorators_by_qualname",
+    "plan_fix",
     "RefusedTarget",
     "StaleFindings",
     "UnparseableSource",
@@ -448,34 +452,83 @@ def _missing_imports(source: str) -> list[str]:
     return needed
 
 
-def apply_fix(path: Path, findings: list[Finding]) -> FixResult:
-    """Insert a classification for each finding. Writes atomically or not at all."""
+def decorators_by_qualname(source: str) -> dict[str, tuple[str, ...]]:
+    """Map every function to the decorators it carries, keyed by dotted path.
+
+    This is what the post-edit check compares. The previous version compared a
+    *set of bare function names*, which adding a decorator never changes -- so
+    it returned the same answer whatever the edit did, as long as the file still
+    parsed. It could not see a decorator landing on the wrong function.
+
+    Keyed by qualified name because a module-level ``transfer`` and a
+    ``Payments.transfer`` method share a bare name, and collapsing them makes
+    the check half-blind again.
+    """
+    out: dict[str, tuple[str, ...]] = {}
+
+    def walk(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                walk(child, f"{prefix}{child.name}.")
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                qualname = f"{prefix}{child.name}"
+                out[qualname] = tuple(ast.unparse(d) for d in child.decorator_list)
+                walk(child, f"{qualname}.")
+            else:
+                walk(child, prefix)
+
+    walk(ast.parse(source), "")
+    return out
+
+
+def _only_insertions(before: bytes, after: bytes) -> list[str]:
+    """Report any original byte deleted or replaced, rather than merely added.
+
+    Some corruption is invisible to the parser. A dropped byte-order mark leaves
+    a file that parses, defines the same functions, and is three bytes shorter
+    than the developer left it. Only a byte comparison sees that.
+    """
+    problems = []
+    for tag, i1, i2, _j1, _j2 in difflib.SequenceMatcher(
+        None, before, after, autojunk=False
+    ).get_opcodes():
+        if tag in ("delete", "replace"):
+            problems.append(f"{tag} of original bytes {before[i1:i2]!r}")
+    return problems
+
+
+@dataclass(frozen=True, slots=True)
+class FixPlan:
+    """What --fix would do, worked out without touching the file."""
+
+    path: Path
+    new_bytes: bytes
+    diff: str
+    functions: list[str]
+
+    @property
+    def inserted(self) -> int:
+        return len(self.functions)
+
+
+def plan_fix(path: Path, findings: list[Finding]) -> FixPlan:
+    """Compute the edit and verify it, writing nothing.
+
+    Separated from the write so a developer can be shown a diff and approve the
+    exact bytes that will land. ``apply_fix`` writes this plan and nothing else.
+    """
     if path.is_symlink():
         raise RefusedTarget(
             f"{path} is a symlink. Rewriting it would replace the link with a "
             "regular file and leave the real source untouched; edit the target."
         )
-    if not os.access(path, os.W_OK):
-        raise RefusedTarget(
-            f"{path} is read-only. An atomic rename only needs a writable "
-            "directory, so this would have succeeded silently -- and read-only "
-            "usually means do not touch."
-        )
 
-    mode = path.stat().st_mode
-    # Read once, and derive the freshness check from THAT text. Reading twice
-    # let a concurrent save land between them: the check re-read the new
-    # content and passed, while the edit applied to the stale copy and the
-    # developer's save was silently discarded. `original` was also read here
-    # and never used.
+    raw = path.read_bytes()
+    bom = b"\xef\xbb\xbf" if raw.startswith(b"\xef\xbb\xbf") else b""
     text = read_source(path)
     newline = "\r\n" if "\r\n" in text else "\n"
     fresh = scan_source(text, path)
 
-    # A subset, in any order. Exact list equality meant a developer who
-    # inspected five findings and accepted three could not express that, and
-    # apply_fix(path, []) raised "changed since it was scanned" about a file
-    # that had not changed.
     digest = hashlib.sha256(text.encode()).hexdigest()
     stale = [f.function for f in findings if f.source_sha != digest]
     if stale:
@@ -488,43 +541,80 @@ def apply_fix(path: Path, findings: list[Finding]) -> FixResult:
     unknown = [f.function for f in findings if (f.function, f.insert_line) not in known]
     if unknown:
         raise StaleFindings(f"{path}: {unknown} are not findings for this file")
+
     if not findings:
-        return FixResult(inserted=0, functions=[])
+        return FixPlan(path=path, new_bytes=raw, diff="", functions=[])
 
     lines = text.split(newline)
-
-    # Bottom-up: an insert at line 10 shifts every line below it.
     for finding in sorted(findings, key=lambda f: f.insert_line, reverse=True):
-        lines.insert(finding.insert_line - 1, " " * finding.indent + _render_decorator(finding))
-
+        lines.insert(
+            finding.insert_line - 1, " " * finding.indent + _render_decorator(finding)
+        )
     needed = _missing_imports(text)
     if needed:
         at = _import_insert_index(text, lines)
         lines[at:at] = needed
-
     modified = newline.join(lines)
 
-    before = _function_names(text, path)
     try:
-        after = _function_names(modified, path)
+        after = decorators_by_qualname(modified)
     except SyntaxError as exc:
         raise UnsafeEdit(f"{path}: edit produced unparseable source: {exc}") from exc
-    if before != after:
+
+    before = decorators_by_qualname(text)
+    if set(before) != set(after):
         raise UnsafeEdit(
-            f"{path}: the edit changed the set of functions "
-            f"({sorted(after - before)} added, {sorted(before - after)} removed); "
-            "nothing written"
+            f"{path}: the set of functions changed "
+            f"({sorted(set(after) - set(before))} added, "
+            f"{sorted(set(before) - set(after))} removed); nothing written"
         )
 
-    # Preserve the mode: a temp-and-rename otherwise turns a 0o755 script into
-    # a 0o644 file, and it stops being executable. PID in the name so concurrent
-    # runs cannot collide on it.
+    intended = sorted(f.function for f in findings)
+    changed = sorted(q for q in before if before[q] != after[q])
+    if changed != intended:
+        raise UnsafeEdit(
+            f"{path}: decorator landed on {changed or 'nothing'}, expected "
+            f"exactly {intended}. Nothing written."
+        )
+
+    new_bytes = bom + modified.encode()
+    envelope = _only_insertions(raw, new_bytes)
+    if envelope:
+        raise UnsafeEdit(f"{path}: original bytes were altered: {envelope}")
+
+    diff = "".join(
+        difflib.unified_diff(
+            raw.decode("utf-8-sig").splitlines(keepends=True),
+            new_bytes.decode("utf-8-sig").splitlines(keepends=True),
+            fromfile=f"a/{path.name}",
+            tofile=f"b/{path.name}",
+        )
+    )
+    return FixPlan(
+        path=path, new_bytes=new_bytes, diff=diff,
+        functions=[f.function for f in findings],
+    )
+
+
+def apply_fix(path: Path, findings: list[Finding]) -> FixResult:
+    """Write the verified plan. Atomically, or not at all."""
+    if not os.access(path, os.W_OK):
+        raise RefusedTarget(
+            f"{path} is read-only. An atomic rename only needs a writable "
+            "directory, so this would have succeeded silently -- and read-only "
+            "usually means do not touch."
+        )
+    plan = plan_fix(path, findings)
+    if not plan.functions:
+        return FixResult(inserted=0, functions=[])
+
+    mode = path.stat().st_mode
     tmp = path.with_name(f"{path.name}.{os.getpid()}.finagent-tmp")
     try:
-        tmp.write_bytes(modified.encode())
+        tmp.write_bytes(plan.new_bytes)
         os.chmod(tmp, stat.S_IMODE(mode))
         tmp.replace(path)
     finally:
         tmp.unlink(missing_ok=True)
 
-    return FixResult(inserted=len(findings), functions=[f.function for f in findings])
+    return FixResult(inserted=plan.inserted, functions=plan.functions)
