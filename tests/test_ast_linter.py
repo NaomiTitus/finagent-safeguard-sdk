@@ -332,3 +332,36 @@ class TestQuotedAnnotations:
             tmp_path, 'def move(src: str, dst: str, value: "Decimal") -> None:\n    pass\n'
         )
         assert [f.signal for f in found] == ["type"]
+
+
+class TestImportForms:
+    """The structural backstop must see every ordinary way to import a module."""
+
+    @pytest.mark.parametrize(
+        "statement",
+        [
+            "from finagent_safeguard.bank_client import BankClient",
+            "from finagent_safeguard import bank_client",
+            "from finagent_safeguard import bank_client as bc",
+            "from . import bank_client",
+            "import finagent_safeguard.bank_client",
+        ],
+    )
+    def test_every_import_form_reaches_the_backstop(
+        self, tmp_path: Path, statement: str
+    ) -> None:
+        found = _findings(tmp_path, f"{statement}\n\n\ndef helper(x: str) -> str:\n    return x\n")
+        assert [f.signal for f in found] == ["bank_client_import"], statement
+
+
+class TestDetectionLineModel:
+    def test_indent_is_read_from_the_right_line(self, tmp_path: Path) -> None:
+        """Detection used str.splitlines(), which splits on characters the
+        tokenizer ignores -- so the indent was read off the wrong line and
+        --fix refused the file permanently, blaming the edit, not the scan."""
+        found = _findings(
+            tmp_path,
+            'BANNER = "a\u2028b"\n\n\nclass P:\n'
+            "    def transfer(self, amount):\n        pass\n",
+        )
+        assert found[0].indent == "    "

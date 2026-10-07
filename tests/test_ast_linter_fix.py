@@ -663,3 +663,73 @@ class TestQualnameCheckAlone:
         with pytest.raises(linter.UnsafeEdit, match="landed on"):
             linter.apply_fix(p, linter.scan_file(p))
         assert p.read_bytes() == before
+
+
+class TestRuntimeBinding:
+    """An import must be bound *at runtime*, not merely present in the tree."""
+
+    def test_a_type_checking_import_does_not_count_as_bound(
+        self, tmp_path: Path
+    ) -> None:
+        """`if TYPE_CHECKING:` imports exist only for type-checkers. Counting
+        them meant the tool skipped the import, inserted the decorator, and
+        produced a file that parsed, kept the same functions, passed all four
+        write guards -- and raised NameError on import."""
+        import subprocess
+        import sys
+
+        p = tmp_path / "m.py"
+        p.write_text(
+            "from __future__ import annotations\n"
+            "from decimal import Decimal\n"
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from finagent_safeguard.taxonomy.policies import FinancialCategory\n"
+            "\n\ndef transfer(amount: Decimal) -> None:\n    pass\n"
+        )
+        _fix(p)
+        done = subprocess.run(
+            [sys.executable, "-c", f"import runpy; runpy.run_path({str(p)!r})"],
+            capture_output=True, text=True, cwd=Path(__file__).resolve().parents[1],
+        )
+        assert done.returncode == 0, done.stderr
+
+    def test_a_function_local_import_does_not_count_as_bound(
+        self, tmp_path: Path
+    ) -> None:
+        import subprocess
+        import sys
+
+        p = tmp_path / "m.py"
+        p.write_text(
+            "from decimal import Decimal\n\n\n"
+            "def helper() -> None:\n"
+            "    from finagent_safeguard.core.decorators import regulated_tool\n\n\n"
+            "def transfer(amount: Decimal) -> None:\n    pass\n"
+        )
+        _fix(p)
+        done = subprocess.run(
+            [sys.executable, "-c", f"import runpy; runpy.run_path({str(p)!r})"],
+            capture_output=True, text=True, cwd=Path(__file__).resolve().parents[1],
+        )
+        assert done.returncode == 0, done.stderr
+
+
+class TestFixIsFastEnoughToUse:
+    def test_forty_functions_complete_quickly(self, tmp_path: Path) -> None:
+        """The byte guard compared individual bytes, which made SequenceMatcher
+        degenerate: 40 functions took 1.4s and a 50 KB module would have taken
+        minutes. That is how a --fix flag gets abandoned."""
+        import time
+
+        p = tmp_path / "m.py"
+        p.write_text(
+            "from decimal import Decimal\n\n\n"
+            + "".join(
+                f"def transfer_{i}(amount: Decimal) -> None:\n    pass\n\n\n"
+                for i in range(40)
+            )
+        )
+        started = time.monotonic()
+        _fix(p)
+        assert time.monotonic() - started < 0.5

@@ -213,8 +213,13 @@ def _module_reaches_bank(dotted: str) -> bool:
 
 def _reaches_bank(tree: ast.AST) -> bool:
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            if _module_reaches_bank(node.module):
+        if isinstance(node, ast.ImportFrom):
+            # `from finagent_safeguard import bank_client` puts the module in
+            # the NAME, not in node.module -- and `from . import bank_client`
+            # has node.module of None entirely. Both were invisible.
+            if node.module and _module_reaches_bank(node.module):
+                return True
+            if any(_module_reaches_bank(a.name) for a in node.names):
                 return True
         elif isinstance(node, ast.Import):
             if any(_module_reaches_bank(a.name) for a in node.names):
@@ -277,7 +282,11 @@ def scan_source(source: str, path: Path) -> list[Finding]:
 
     bank = _reaches_bank(tree)
     digest = hashlib.sha256(source.encode()).hexdigest()
-    lines = source.splitlines()
+    # The same line model as the write path. This used to be
+    # source.splitlines(), which disagrees with ast on form feeds and line
+    # separators -- so the indent was read off the wrong line and --fix
+    # refused the file permanently, blaming the edit rather than the scan.
+    lines = _split_source_lines(source)
     findings: list[Finding] = []
 
     aliases = _classifier_aliases(tree)
@@ -467,8 +476,18 @@ def _missing_imports(source: str) -> list[str]:
     class as the one fixed in ``_import_insert_index``, five lines below it,
     and missed.
     """
+    # Only direct children of the module body. ``ast.walk`` descends into
+    # ``if TYPE_CHECKING:`` blocks and function bodies, where an import is not
+    # bound at runtime -- so the tool skipped the import, inserted the decorator,
+    # and produced a file that parsed, defined the same functions, passed all
+    # four write guards, and raised NameError on import.
+    #
+    # Conservative on purpose: a module-level ``try/except ImportError`` IS
+    # bound at runtime and will be missed here, producing a harmless duplicate
+    # import. A redundant import is a lint warning; a missing one is a broken
+    # module.
     bound: set[str] = set()
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.parse(source).body:
         if isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 bound.add(alias.asname or alias.name)
@@ -516,12 +535,26 @@ def _only_insertions(before: bytes, after: bytes) -> list[str]:
     a file that parses, defines the same functions, and is three bytes shorter
     than the developer left it. Only a byte comparison sees that.
     """
+    # Compared as LINES, not as individual bytes. SequenceMatcher over bytes has
+    # ~256 distinct symbols, so its index degenerates and the cost is
+    # super-quadratic: 40 functions took 1.4s and a 50 KB module would take
+    # minutes, which is how a --fix flag gets abandoned. Splitting into lines
+    # first is ~100x faster and detects exactly the same deletions, because any
+    # lost byte changes the line that held it.
+    # Strip the marker from both sides first and check it separately. An
+    # insertion lands between the BOM and the first line's text, which makes
+    # line 1 look "replaced" even though no byte was lost.
+    BOM = b"\xef\xbb\xbf"
     problems = []
+    if before.startswith(BOM) != after.startswith(BOM):
+        problems.append("the byte-order mark was added or removed")
+    before_lines = before.removeprefix(BOM).splitlines(keepends=True)
+    after_lines = after.removeprefix(BOM).splitlines(keepends=True)
     for tag, i1, i2, _j1, _j2 in difflib.SequenceMatcher(
-        None, before, after, autojunk=False
+        None, before_lines, after_lines, autojunk=False
     ).get_opcodes():
         if tag in ("delete", "replace"):
-            problems.append(f"{tag} of original bytes {before[i1:i2]!r}")
+            problems.append(f"{tag} of original bytes {b''.join(before_lines[i1:i2])!r}")
     return problems
 
 
