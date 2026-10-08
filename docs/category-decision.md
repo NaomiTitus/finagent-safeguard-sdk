@@ -415,3 +415,123 @@ than what was proposed, and it is true.
   licence.
 - Johnson 2013, Bessey 2010 and Sadowski CACM 2018 are Crossref-verified to exist, but ACM is
   unreachable from this environment, so no numbers are quoted from them.
+
+---
+
+# The successful prior art is type inference, not compliance
+
+A final literature pass, prompted by the owner's question: can a simple classifier *suggest*
+which decorator to add, with a human reviewing? The answer is yes, and there is a mature,
+deployed, measured literature for exactly that shape. It is just not in compliance.
+
+## 1. The four papers that matter
+
+| Work | What it does | Measured result |
+|---|---|---|
+| **Typilus** — Allamanis, Barr, Ducousso & Gao, 2020, arXiv `2004.10657` | Graph neural net predicts Python type annotations; **abstains** when unconfident; paired with an optional type checker | Confidently predicts for **70%** of annotatable symbols; when it predicts, the type **type-checks 95%** of the time. Also found *existing wrong* annotations — PRs accepted by `fairseq` and `allennlp` |
+| **TypeWriter** — Pradel, Gousios, Liu & Chandra, 2019, arXiv `1912.03768` (Facebook) | Prediction plus **search-based validation**: runs a gradual type checker over combinations of predicted types, feedback-directed | F1 **0.64** top-1, **0.79** top-5 for return types. Fully annotates **14–44%** of files *while ensuring type correctness*. Deployed at Facebook; thousands of types accepted |
+| **Type4Py** — Mir, Latoskinas, Proksch & Gousios, 2021, arXiv `2101.04470` | Deep similarity learning, nearest-neighbour over a type space | **MRR 77.1%**. Critically: trained and evaluated on a **type-checked** dataset, explicitly because human-provided annotations "might not always be sound" |
+| **ManyTypes4Py** — arXiv `2104.04706` | The benchmark the above are measured on | — |
+
+This is the architecture the owner described, built four times, deployed in industry, and
+reported with real numbers. It is a far better template than anything in the
+compliance-classification literature, where the best figure found was 5.75% macro-F1.
+
+## 2. Why it works there and not here — the one difference that matters
+
+**Typilus has a verifier.** "Did this annotation type-check?" is answerable by machine,
+cheaply, every time. That single fact supplies three things at once:
+
+1. **Sound training labels** without human annotators — Type4Py's deliberate choice.
+2. **A calibratable abstention threshold** — 95% precision at 70% coverage is measurable
+   because the oracle is mechanical.
+3. **Validation before the suggestion reaches a human** — TypeWriter's search-based loop.
+
+**Our problem has no verifier.** "Is this function `PSD2_PAYMENT_EXECUTION`?" cannot be
+checked by machine, which is precisely why nine trained annotators reached Krippendorff's
+α = 0.251. There is no type checker for regulatory scope.
+
+This reframes the whole difficulty. The gap is not that our model would be too weak. It is
+that **we have no oracle**, and every one of Typilus's three advantages derives from having one.
+
+## 3. The consequence: predict something checkable, derive the rest
+
+The path to a working classifier is to stop predicting the legal category and predict a
+property that *can* be verified, then derive the category from a reviewed table.
+
+| Target | Oracle | Label soundness |
+|---|---|---|
+| "Is this `PSD2_PAYMENT_EXECUTION`?" | none | α = 0.251 |
+| "Does this function reach the bank client?" | call-graph reachability | **mechanical** |
+| "Does a value here flow from an IBAN/amount-typed source?" | data-flow, as the Turku R2/R3 rules do | **mechanical** |
+| "Would a reviewer accept this suggestion?" | recorded accept/reject decisions | **observable, accumulating** |
+
+The third column is the point. A classifier trained on the middle two rows has labels as sound
+as Typilus's, and the regulatory category then comes from a human-reviewed property→provision
+table — which keeps the `policies.py` boundary intact, because the model never asserts a legal
+conclusion.
+
+The fourth row is the long game and costs nothing to start: **log every accept and reject from
+day one.** Those are free, sound, accumulating labels for the only question that ultimately
+matters — would a reviewer have agreed? Typilus-style work is only possible because annotated
+corpora existed to learn from; ours begins the moment the tool ships.
+
+## 4. A cheaper Step 0 than the one planned
+
+Ahmed, Devanbu, Treude & Pradel, 2024, arXiv `2408.05534` — *Can LLMs Replace Manual Annotation
+of Software Engineering Artifacts?* — applied six models to ten annotation tasks from five
+datasets and found LLM agreement "equal or close to human-rater agreement". Their two
+methodological proposals are directly usable:
+
+- **Model–model agreement predicts whether a task is suitable for annotation at all.**
+- **Model confidence selects the specific samples** where a model can safely stand in for a human.
+
+So Step 0 gains a pre-test costing hours rather than two days: have several independent models
+label the same balanced sample 6-way and binary, and compute agreement between *them*. If
+independent models cannot agree on the 6-way label, human annotators will not either, and the
+taxonomy can be collapsed before anyone spends a day labelling. A human pilot still runs — this
+narrows what it has to settle, it does not replace it.
+
+## 5. Step 5 has a field, and a warning attached
+
+Ranking warnings rather than classifying them is a mature area: **Actionable Warning
+Identification**, surveyed across 51 primary studies by Ge et al., 2023, arXiv `2312.00324`.
+Headline results are strong — Yedida et al., arXiv `2205.10504`, report median AUC 92% with
+perfect results on 4 of 8 projects.
+
+**But the lineage has the PrimeVul problem.** Kang, Aw & Lo, 2022, arXiv `2202.05982`, audited
+the widely-used "Golden Features" results and found:
+
+- ground-truth labels **leaked into the features** that measure the proportion of actionable
+  warnings in a context;
+- **test warnings appearing in the training set**;
+- and the warning oracle — a heuristic comparing a revision to a later reference revision —
+  "produces labels that **do not agree with human oracles**", with the choice of reference
+  revision changing the distribution.
+
+Their conclusion: prior performance "is overoptimistic of their true performance if adopted in
+practice". So AWI is the right field for Step 5 and its published numbers are not a target to
+beat. Whether Yedida et al. (May 2022) addressed the leakage Kang et al. reported (February
+2022) was **not determined** and must be read before either is cited.
+
+## 6. What this changes
+
+Step 5 is upgraded from a fallback to the main modelling contribution, and it is now
+*well-founded* rather than merely honest:
+
+- Train a classifier to predict a **mechanically verifiable** structural property, not a legal
+  category. Labels are then as sound as Typilus's, and the α = 0.251 objection does not apply.
+- Report **precision at a chosen coverage**, the Typilus framing, rather than accuracy — a
+  suggester that covers 70% at high precision and abstains on the rest is the demonstrated
+  shape of a useful tool.
+- **Validate every suggestion against the structural rules before showing it**, which is
+  TypeWriter's search-based validation adapted: the proposal must survive the deterministic
+  check or it is not offered.
+- **Log accept/reject decisions from the first day**, as the only sound label source for the
+  question that matters.
+- Cite Typilus, TypeWriter and Type4Py as the template, and the AWI survey plus the Kang
+  replication for the ranking half.
+
+The owner's instinct was right, and more defensible than the design it replaces: a model that
+proposes and abstains, validated mechanically, with a human deciding. The correction is only to
+what it predicts.
