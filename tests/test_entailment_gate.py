@@ -14,7 +14,15 @@ from __future__ import annotations
 
 import pytest
 
-from tools.check_entailment import _parse
+from tools.check_entailment import (
+    CONFIRMED,
+    MALFORMED,
+    REVIEW,
+    UNSUPPORTED,
+    _parse,
+    aggregate,
+    cross_model,
+)
 from tools.entailment import render_claim, verify_span
 
 # A real pinned provision, with the typography legal texts actually carry:
@@ -110,3 +118,106 @@ class TestClaimRendering:
 
         thin = [c.provision_id for c in cases() if len(c.claim.splitlines()) < 2]
         assert not thin, f"claims with nothing to judge: {thin}"
+
+
+def _j(model: str, run: int, verdict: str, span: str, ok: bool = True) -> dict[str, object]:
+    return {
+        "model": model, "run": run, "verdict": verdict, "span": span,
+        "span_verified": ok, "span_problem": "" if ok else "not in text",
+        "reason": "", "input_tokens": 0, "output_tokens": 0,
+    }
+
+
+class TestTheDecisionRuleIsLopsided:
+    """Confirming must be hard; flagging must be easy.
+
+    A false CONFIRMED certifies a wrong regulatory tag and ships it. A false
+    CLAIM_UNSUPPORTED costs somebody a few minutes' reading. Every test here
+    pins that asymmetry, because a rule that drifts towards confirming is the
+    one failure that would make the whole audit worse than nothing.
+    """
+
+    def test_unanimous_on_one_span_confirms(self) -> None:
+        judgements = [
+            _j("claude-opus-5", 1, CONFIRMED, "EUR 30"),
+            _j("claude-opus-5", 2, CONFIRMED, "EUR 30"),
+            _j("claude-sonnet-5", 1, CONFIRMED, "EUR 30"),
+        ]
+        got = aggregate(judgements)
+        assert got["verdict"] == CONFIRMED
+        assert "unanimous across 3" in got["why"]
+
+    def test_same_verdict_but_different_spans_needs_a_human(self) -> None:
+        """The test I most wanted. Three judges agree the claim holds and each
+        points at different text, which means the claim is vaguely supported
+        rather than specifically supported -- and for a legal reading that
+        distinction is the entire question."""
+        judgements = [
+            _j("claude-opus-5", 1, CONFIRMED, "EUR 30"),
+            _j("claude-opus-5", 2, CONFIRMED, "shall be allowed not to apply"),
+            _j("claude-sonnet-5", 1, CONFIRMED, "remote electronic payment"),
+        ]
+        got = aggregate(judgements)
+        assert got["verdict"] == REVIEW
+        assert "3 different spans" in got["why"]
+
+    def test_one_dissent_out_of_six_is_enough_to_flag(self) -> None:
+        """No majority vote. One judge finding the text unsupportive outweighs
+        five confirmations, because the cost of being wrong is not symmetric."""
+        judgements = [_j("claude-opus-5", i, CONFIRMED, "EUR 30") for i in range(1, 6)]
+        judgements.append(_j("claude-sonnet-5", 1, UNSUPPORTED, "EUR 30"))
+        assert aggregate(judgements)["verdict"] == UNSUPPORTED
+
+    def test_an_unverified_span_blocks_confirmation(self) -> None:
+        """Even unanimous agreement cannot confirm on evidence that is not in
+        the provision. The quote is the oracle, not the vote."""
+        judgements = [
+            _j("claude-opus-5", 1, CONFIRMED, "EUR 30"),
+            _j("claude-sonnet-5", 1, CONFIRMED, "EUR 30 per transaction", ok=False),
+        ]
+        got = aggregate(judgements)
+        assert got["verdict"] == REVIEW
+        assert "not in the text" in got["why"]
+
+    def test_a_failed_call_blocks_confirmation(self) -> None:
+        """A dead call must not be treated as absent. Dropping it would make a
+        two-of-three agreement look unanimous."""
+        judgements = [
+            _j("claude-opus-5", 1, CONFIRMED, "EUR 30"),
+            _j("claude-opus-5", 2, CONFIRMED, "EUR 30"),
+            _j("claude-sonnet-5", 1, MALFORMED, "", ok=False),
+        ]
+        assert aggregate(judgements)["verdict"] == REVIEW
+
+    def test_no_judgements_is_not_a_confirmation(self) -> None:
+        assert aggregate([])["verdict"] == MALFORMED
+
+    def test_a_single_run_can_still_confirm_but_is_recorded_as_one(self) -> None:
+        """Permitted, since --runs 1 is a legitimate smoke test, but the count
+        is written into the record so a one-judgement confirmation can never be
+        mistaken for a robust one."""
+        got = aggregate([_j("claude-opus-5", 1, CONFIRMED, "EUR 30")])
+        assert got["verdict"] == CONFIRMED
+        assert "across 1 judgements" in got["why"]
+
+
+class TestCrossModelReporting:
+    def test_agreement_within_a_model_is_collapsed(self) -> None:
+        judgements = [
+            _j("claude-opus-5", 1, CONFIRMED, "a"),
+            _j("claude-opus-5", 2, CONFIRMED, "a"),
+            _j("claude-sonnet-5", 1, UNSUPPORTED, "a"),
+        ]
+        assert cross_model(judgements) == {
+            "claude-opus-5": CONFIRMED,
+            "claude-sonnet-5": UNSUPPORTED,
+        }
+
+    def test_a_model_disagreeing_with_itself_is_surfaced(self) -> None:
+        """Self-inconsistency is the signal that the claim is borderline, and
+        it is invisible without repeated runs."""
+        judgements = [
+            _j("claude-opus-5", 1, CONFIRMED, "a"),
+            _j("claude-opus-5", 2, UNSUPPORTED, "a"),
+        ]
+        assert cross_model(judgements)["claude-opus-5"].startswith("SPLIT:")
