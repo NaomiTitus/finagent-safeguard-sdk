@@ -63,10 +63,14 @@ Two citations that change how this project should present itself:
   Turku — annotation-driven GDPR compliance tooling. This is substantially this project's
   design, in Java, six years earlier. Cite it; do not claim novelty.
 - **Tang, Østvold & Bruntink (2023)**, DOI `10.3233/FAIA230228`, Norsk Regnesentral — the only
-  verified precision figure in the literature for this task: **0.87, n=4, recall not reported.**
+  verified precision figure in the literature for this task: **0.87 across four applications**,
+  recall not reported. Say "four applications", not "n=4": the weakness is four subject
+  programs, which is a different and more serious criticism than four data points.
 - **PrivDev** (arXiv `2610.03518`) maps Bearer's 122 types to GDPR via DPV: 43 derived
   mechanically, **79 needed an LLM** — used offline, SHACL-validated, frozen. Nine annotators
-  agreed only **0.72**.
+  reached **0.72 raw agreement**, and the authors also report **Gwet's AC1 = 0.68**. The raw
+  figure is *not* a kappa and must never be quoted as one: raw agreement is always the higher
+  number because it includes agreement reached by chance. AC1 is the comparable statistic.
 
 That last number is the warning. If trained annotators reach 0.72 on data-type→regulation
 mapping, no classifier can be judged against a ground truth we have not measured agreement on.
@@ -129,10 +133,13 @@ against them.
 - `pyiso20022` goes in the **test** split specifically, because it is the blind spot.
 
 The only existing code-level compliance benchmark, **GDPR-Bench-Android** (arXiv `2511.00619`,
-MIT), was audited and has five defects we must not reproduce: **0 negative instances** (false
-positives unmeasurable), **56% duplicate snippets**, classes with n=1 inside a 23-class
-macro-F1, median snippet 95 characters, and **no agreement statistic anywhere** — its own
-README links annotation guidelines that 404. Publishing ours with those five fixed is a better
+MIT), was audited and has defects we must not reproduce: **0 negative instances** (the schema has
+seven fields and no polarity field at all, so false positives are unmeasurable); **857
+distinct snippets across 1,951 rows**, i.e. 1,094 repeats; **1,044 of 1,951 rows (53.5%) come
+from a single app**; the corpus is **entirely RAT/spyware**, which is not the population any
+normal codebase is drawn from; **74% of rows cover four articles** while five articles have
+exactly one row each; and **no agreement statistic anywhere** — its own README links
+annotation guidelines that do not exist in the repository. Publishing ours with those five fixed is a better
 contribution than any score.
 
 **Headline metric: governance regret per 1,000 functions**, under a published cost matrix —
@@ -193,3 +200,43 @@ Steps 2–3 are worth building at all.
 - `PLAN.md` §5.4.1 quotes `claude-opus-5` at $4/$20 per Mtok; the pricing page read during this
   work gave $5/$25. **Unverified by me** — check before relying on either.
 - `PLAN.md` §13 should cite Hjerppe et al. (2020) as prior art rather than implying novelty.
+
+## 9. Novelty audit — one claim retracted before publication
+
+A third isolated agent was asked to disprove four claims before any of them reached a README.
+It disproved one and wounded two. Recorded here because a claim a reviewer can demolish in one
+search is worse than no claim.
+
+| Claim | Verdict | What settles it |
+|---|---|---|
+| Automated insertion of a compliance annotation with provable write safety is new | **RETRACTED** | The Checker Framework ships `insert-annotations-to-source` (repository created 2015) and a manual section titled "Whole-program inference that inserts annotations into source code". LibCST's own README describes a "lossless CST". Our write guards are good engineering, not a contribution |
+| Nobody binds a code annotation to regulatory text | **NARROWED** | W3C DPV 2.3 already carries ELI deep-links to article–paragraph–point level. Verified first-hand: 49 distinct refs in `eu-gdpr.ttl`, e.g. `eli/reg/2016/679/art_6/par_1/pnt_a/oj`. **But** each is a `schema:WebPage` holding a name and a URL — DPV stores **no verbatim text**. "Pinned verbatim span plus corpus digest" survives; "citing the regulation at all" does not |
+| No benchmark exists for regulatory classification of Python financial code | **STANDS, as worded** | Must cite LogiSafetyBench (arXiv `2601.08196`) and the Privacy-as-Code review (arXiv `2412.16667`) or it reads as a missed search |
+| Propose-then-confirm is a new synthesis | **NARROWED** | Every component exists: MonkeyType and pytype propose, the Checker Framework's `-AinferOutputOriginal` lets you diff before accepting, and whole-program inference *is* call-graph propagation. Claim the attributed, citation-carrying **record**, not the mechanism |
+
+### The finding that matters most
+
+**The Turku line was completed by the same three authors in 2022.** Hjerppe, Ruohonen &
+Leppänen, *Extracting LPL privacy policy purposes from annotated web service source code*,
+Software and Systems Modeling **22(1):331–349**, DOI `10.1007/s10270-022-00998-y`, CC-BY 4.0.
+Verified independently via Crossref. They take annotated source code and generate Layered
+Privacy Language policy data with a working static analysis tool.
+
+So framing this project as "the next step after Turku 2020" is disproved by the citation list
+of the very paper we cite. Both papers get cited, and the 2022 one is acknowledged as having
+already taken the annotation→policy step.
+
+**Undetermined:** whether the generated LPL policies carry article-level legal citations.
+Springer serves an HTML interstitial to automated clients despite the CC-BY licence, so the
+full text was not obtainable in this session. This is no longer decisive for the narrowed
+claim, because LPL concerns GDPR privacy policies and the open ground below is EU financial
+law — but it should be read before publication.
+
+### The one claim worth staking the README on
+
+Verified first-hand: DPV 2.3's `legal/eu/` contains **aiact, dga, ehds, gdpr, nis2**. There is
+**no PSD2, no AMLR, no DORA**. No search surfaced any code-level or vocabulary-level treatment
+of EU financial law.
+
+That gap is narrow, real, checkable, and ours. It is a much smaller claim than the four above,
+and it is the only one that survives a hostile reading.
