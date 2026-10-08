@@ -384,3 +384,49 @@ cases are each caught by a stronger check first, so neither has a test that depe
 alone. Both are baselined `not_caught` rather than given a contrived test, on the principle
 that a row reading `caught` because of an unrelated assertion is worse than one that admits it
 is a backstop. CI reports both on every run, so neither can be quietly forgotten.
+
+---
+
+## 2026-10-07 — F-015: fourth cold review, four defects in the linter
+
+The fourth isolated review (diff + test output + the committed Day 3 criterion, nothing else)
+found four. Three were silent — the tool reported success while being wrong.
+
+| # | Defect | Why it was silent |
+|---|---|---|
+| 1 | `TYPE_CHECKING` imports counted as bound | `_missing_imports` walked the whole tree, so an import that exists only for type-checkers looked satisfied. `--fix` skipped it, wrote the decorator, and the file passed all four write guards — then raised `NameError` on import. |
+| 2 | Detection used `str.splitlines()` | It splits on `\x0b \x0c \x1c \x1d \x1e \x85    `, which the tokenizer ignores. The indent was read off the wrong line, so `--fix` refused the file and blamed the edit rather than the scan. |
+| 3 | `_reaches_bank` missed `ImportFrom.names` | `from finagent_safeguard import bank_client` and `from . import bank_client` were invisible to the structural backstop. |
+| 4 | `_only_insertions` was super-quadratic | Byte-level `SequenceMatcher` made 40 functions take 1.38s. A 50 KB module would have taken minutes, which is how a `--fix` flag gets abandoned. |
+
+**Fixes.** (1) `_missing_imports` now reads `ast.parse(source).body` only — module-level,
+runtime-bound. Deliberately conservative: a module-level `try/except ImportError` is missed,
+which produces a harmless duplicate import rather than a `NameError`. (2) Detection now uses
+`_split_source_lines`, the same tokenizer-faithful split the write path already used.
+(3) `alias.name` on `ImportFrom` is checked, and `node.module is None` (relative import) is
+handled. (4) Line-level `SequenceMatcher`: 1.38s → 0.026s, a 53× speedup.
+
+**One subtlety the line-level change introduced.** A BOM lives inside the first line. When
+imports are inserted above it, the first line changes, so the comparison reported `replace` of
+that line even though no byte was lost — the guard became over-strict on exactly the case it
+was built for. Resolved by stripping the marker from both sides and checking its presence
+separately, which is also the clearer statement of intent.
+
+### Leftovers cleared in the same pass
+
+| Item | Finding |
+|---|---|
+| `_function_names` | Unreferenced. Deleted. |
+| `_matches_tokens` multi-word branch | Matched by **substring**, so the token `national_id` fired on `international_ideas` — a GDPR category written onto unrelated code. Now matches a run of whole words. |
+| `_matches_tokens` joined branch | Compared a *sorted*-and-rejoined form (`id_national`) against tokens written in reading order (`national_id`). It could never match. Dead. |
+| `_is_runtime_discarded` | Took an `aliases` argument and ignored it, trusting the bare name `overload`. **Any** local decorator of that name silently exempted a money-handling function — an invisible false negative a developer could create by accident. Now resolved through `typing` / `typing_extensions` imports, with `@typing.overload` handled by attribute. |
+
+Mutation row `L15` was re-anchored to the new code and `L26` added for the token fix. Baseline
+is 34 rows. Suite is 223 tests.
+
+### The pattern across four reviews, named
+
+Every review has found at least one defect of the same shape: **the tool reporting success
+while being wrong**. Not crashes — crashes are cheap. The expensive class is a confident
+`classified` on a function that is not protected. Reviews 1, 3 and 4 each found one. That is
+the failure mode this project exists to prevent, which makes it the one to keep hunting.
