@@ -55,6 +55,80 @@ from tools.entailment import (  # noqa: E402
 )
 
 MODEL = "claude-opus-5"
+API = "https://api.anthropic.com/v1"
+API_VERSION = "2023-06-01"
+
+
+def _post(path: str, body: dict[str, Any], *, attempts: int = 4) -> dict[str, Any]:
+    """POST to the Messages API using the standard library.
+
+    The vendor SDK's HTTP client cannot reach the API from this environment
+    (``APIConnectionError``) while ``urllib`` and ``curl`` both can. Using the
+    stdlib is the better answer regardless: this project is stdlib-only by
+    design, and the audit should not depend on a package to be reproducible by
+    whoever reads the repository.
+
+    Retries on the transient classes only -- 429 and 5xx, plus connection
+    errors. A 400 or 401 is a bug or a bad key and retrying would just spend
+    four times as long failing.
+    """
+    import time
+    import urllib.error
+    import urllib.request
+
+    request = urllib.request.Request(
+        f"{API}/{path}",
+        data=json.dumps(body).encode(),
+        headers={
+            "x-api-key": os.environ["ANTHROPIC_API_KEY"],
+            "anthropic-version": API_VERSION,
+            "content-type": "application/json",
+        },
+    )
+
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                loaded = json.load(response)
+            if not isinstance(loaded, dict):
+                raise ValueError("API response is not an object")
+            return loaded
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (429, 500, 502, 503, 529):
+                detail = exc.read()[:400].decode("utf-8", "replace")
+                raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
+            last = exc
+        except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+            last = exc
+        if attempt < attempts - 1:
+            time.sleep(2**attempt)
+
+    raise RuntimeError(f"giving up after {attempts} attempts: {last}")
+
+
+def _create(system: str, payload: str, max_tokens: int) -> dict[str, Any]:
+    return _post(
+        "messages",
+        {
+            "model": MODEL,
+            "max_tokens": max_tokens,
+            "system": system,
+            "messages": [{"role": "user", "content": payload}],
+        },
+    )
+
+
+def _count_tokens(system: str, payload: str) -> int:
+    counted = _post(
+        "messages/count_tokens",
+        {
+            "model": MODEL,
+            "system": system,
+            "messages": [{"role": "user", "content": payload}],
+        },
+    )
+    return int(counted["input_tokens"])
 
 # $/MTok (input, output, cache-read), verified against the live pricing page
 # 2026-10-04. PLAN.md 5.4.1 quotes 4/20 for this model, which is stale.
@@ -91,14 +165,11 @@ def _parse(text: str) -> dict[str, str]:
     return {str(k): str(v) for k, v in loaded.items()}
 
 
-def _judge(client: Any, case: Case) -> dict[str, Any]:
-    reply = client.messages.create(
-        model=MODEL,
-        max_tokens=OUTPUT_PER_CALL,
-        system=rubric(),
-        messages=[{"role": "user", "content": case.payload() + OUTPUT_CONTRACT}],
+def _judge(case: Case) -> dict[str, Any]:
+    reply = _create(rubric(), case.payload() + OUTPUT_CONTRACT, OUTPUT_PER_CALL)
+    text = "".join(
+        block.get("text", "") for block in reply["content"] if block.get("type") == "text"
     )
-    text = "".join(block.text for block in reply.content if block.type == "text")
     parsed = _parse(text)
 
     verdict = parsed.get("verdict", "")
@@ -116,8 +187,8 @@ def _judge(client: Any, case: Case) -> dict[str, Any]:
         "span_problem": why,
         "reason": parsed.get("reason", ""),
         "usage": {
-            "input_tokens": reply.usage.input_tokens,
-            "output_tokens": reply.usage.output_tokens,
+            "input_tokens": reply["usage"]["input_tokens"],
+            "output_tokens": reply["usage"]["output_tokens"],
         },
     }
 
@@ -133,19 +204,13 @@ def _header() -> dict[str, str]:
     }
 
 
-def _dry_run(client: Any, found: list[Case]) -> int:
+def _dry_run(found: list[Case]) -> int:
     rubric_text = rubric()
-    fixed = client.messages.count_tokens(
-        model=MODEL, system=rubric_text, messages=[{"role": "user", "content": "x"}]
-    ).input_tokens
+    fixed = _count_tokens(rubric_text, "x")
 
-    totals = []
+    totals: list[tuple[int, str]] = []
     for case in found:
-        n = client.messages.count_tokens(
-            model=MODEL,
-            system=rubric_text,
-            messages=[{"role": "user", "content": case.payload() + OUTPUT_CONTRACT}],
-        ).input_tokens
+        n = _count_tokens(rubric_text, case.payload() + OUTPUT_CONTRACT)
         totals.append((n, case.provision_id))
 
     calls = len(totals)
@@ -261,19 +326,16 @@ def main(argv: list[str]) -> int:
         print("ANTHROPIC_API_KEY is not set in the environment.", file=sys.stderr)
         return 2
 
-    import anthropic
-
-    client = anthropic.Anthropic()
     found = cases()
 
     if args.dry_run:
-        return _dry_run(client, found)
+        return _dry_run(found)
 
     records: list[dict[str, Any]] = [_header()]
     for i, case in enumerate(found, 1):
         print(f"  [{i:>2}/{len(found)}] {case.provision_id} ... ", end="", flush=True)
         try:
-            record = _judge(client, case)
+            record = _judge(case)
         except Exception as exc:  # one bad call must not lose the whole run
             record = {
                 "provision_id": case.provision_id,
