@@ -80,7 +80,7 @@ from tools.entailment import (  # noqa: E402
 API = "https://api.anthropic.com/v1"
 API_VERSION = "2023-06-01"
 
-DEFAULT_JUDGES = ("claude-opus-5", "claude-sonnet-5")
+DEFAULT_JUDGES = ("claude-opus-5", "claude-sonnet-5", "claude-haiku-5-5")
 DEFAULT_RUNS = 3
 WORKERS = 6
 
@@ -89,6 +89,11 @@ WORKERS = 6
 PRICES: dict[str, tuple[Decimal, Decimal]] = {
     "claude-opus-5": (Decimal("5"), Decimal("25")),
     "claude-sonnet-5": (Decimal("2"), Decimal("10")),
+    # UNVERIFIED. Haiku 5.5 was released 2026-10-07 and the models endpoint
+    # exposes no pricing; this is Haiku 4.5's rate as a placeholder. Treat any
+    # Haiku line in a cost report as indicative until the published rate is
+    # checked. Token counts in the verdict file are exact regardless.
+    "claude-haiku-5-5": (Decimal("1"), Decimal("5")),
 }
 OUTPUT_PER_CALL = 2000
 

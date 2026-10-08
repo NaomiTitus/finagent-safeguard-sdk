@@ -63,6 +63,10 @@ class Addressee(StrEnum):
     PAYMENT_SERVICE_PROVIDER = "payment_service_provider"
     OBLIGED_ENTITY = "obliged_entity"
     CONTROLLER = "controller"
+    #: Added after the first entailment run: GDPR Art. 87 was recorded as an
+    #: enforcing duty on controllers, and six of six judgements found it to be
+    #: a permission addressed to Member States. There was no way to say that.
+    MEMBER_STATE = "member_state"
     DEPLOYER = "deployer"
     FINANCIAL_ENTITY = "financial_entity"
 
@@ -689,12 +693,19 @@ OBLIGATIONS: tuple[Obligation, ...] = (
     ),
     Obligation(
         provision=GDPR_ART_87,
-        addressee=Addressee.CONTROLLER,
-        enforcing=True,
+        addressee=Addressee.MEMBER_STATE,
+        enforcing=False,
         interpretation_boundary=(
-            "A national identification number is not Art. 9 special-category data. The "
-            "restriction arises from national law made under Art. 87, and the tests differ "
-            "by country -- a single pan-Nordic rule would be wrong."
+            "Art. 87 is a permission, not a duty: Member States *may* further determine "
+            "the conditions for processing a national identification number. It binds "
+            "legislatures, not controllers, and the SDK cannot enforce it. Recorded here "
+            "because the national rules made under it are what actually constrain a "
+            "Nordic deployment, and the tests differ by country -- a single pan-Nordic "
+            "rule would be wrong. A national identification number is also not Art. 9 "
+            "special-category data. "
+            "Corrected after the first entailment run found the original entry had both "
+            "the addressee and the direction wrong: the same class of error as reading "
+            "the RTS Art. 16 derogation as an SCA trigger."
         ),
     ),
     Obligation(provision=DORA_ART_28_3, addressee=Addressee.FINANCIAL_ENTITY, enforcing=True),
@@ -747,9 +758,14 @@ REFERENCE_POINTS: tuple[ReferencePoint, ...] = (
             locus=AMLR_ART_19_4,
         ),
         governs=(
-            "FULL customer due diligence trigger for occasional transactions in cash. "
-            "Not a reduced or simplified regime -- simplified due diligence is Art. 33 "
-            "and is risk-based, not threshold-based."
+            "Derogation from Art. 19(1), point (b). At an occasional cash transaction of "
+            "at least EUR 3 000, an obliged entity must apply *at least* the customer "
+            "due diligence measure in Art. 20(1), point (a) -- identification and "
+            "verification of the customer -- and not the full CDD package. Simplified "
+            "due diligence under Art. 33 is a separate, risk-based regime, not this. "
+            "Corrected after the first entailment run: this was recorded as a FULL CDD "
+            "trigger, 'not a reduced or simplified regime', which inverts a derogation "
+            "into a wider duty than the text imposes."
         ),
         applies_from=_dt.date(2027, 7, 10),
     ),

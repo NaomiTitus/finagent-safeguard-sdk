@@ -91,7 +91,19 @@ def render_claim(provision: Any) -> str:
         if exemption.provision is provision:
             lines.append(f"Asserted effect: {exemption.effect}")
             for limb in exemption.limbs:
-                lines.append(f"  limb {limb.name} = {limb.as_cited} ({limb.provenance})")
+                # A limb's numeral often lives in a different provision from the
+                # exemption that uses it: the RTS Art. 18 exemption's EUR
+                # 500/250/100 are cited to the Annex, which is pinned and judged
+                # on its own. Including them here asked the judge whether Art. 18
+                # contains figures the registry never claimed it contains, and
+                # six of nine judgements correctly answered no. The registry was
+                # right; the question was wrong. Each numeral is verified at the
+                # provision it is actually cited to.
+                if limb.locus is not None and limb.locus is not provision:
+                    continue
+                lines.append(
+                    f"  limb {limb.name} = {limb.as_cited} ({limb.provenance})"
+                )
 
     for param in REGISTRY.numeric_parameters():
         if param.locus is provision:
@@ -100,7 +112,11 @@ def render_claim(provision: Any) -> str:
     for point in REGISTRY.reference_points():
         if point.parameter.locus is provision:
             lines.append(f"Reference point governs: {point.governs}")
-            lines.append(f"Operative: {point.operative}")
+            # ``operative`` is an SDK modelling flag -- whether this SDK acts on
+            # the number -- and says nothing about the provision. Submitting it
+            # for entailment asked the judge to verify a fact about our code
+            # against a legal text, and dissents duly cited it as unverifiable.
+            # Only assertions about the text belong in a claim.
 
     # Application dates were absent from the original renderer, so the two
     # date claims were priced but would never have been judged. A wrong
