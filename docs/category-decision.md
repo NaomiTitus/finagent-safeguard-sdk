@@ -240,3 +240,178 @@ of EU financial law.
 
 That gap is narrow, real, checkable, and ours. It is a much smaller claim than the four above,
 and it is the only one that survives a hostile reading.
+
+---
+
+# Revision after the second debate: the tool must not assert a category
+
+Three further isolated agents reviewed the design above — one defending it, one attacking it,
+one auditing novelty. **The proposal did not survive.** What follows supersedes §5 Step 3 and
+§6.
+
+## 1. What two independent agents found separately
+
+Both the defending and the attacking agent, without seeing each other's work, located the same
+number and reported it as decisive.
+
+**PrivDev** (arXiv `2610.03518`), nine annotators, 711 judgments on which GDPR provision
+applies to a static-analyser finding:
+
+| Statistic | Value |
+|---|---|
+| Raw agreement | 0.72 |
+| Gwet's AC1 | 0.682 |
+| **Krippendorff's α** | **0.251** |
+| α on the Article 9 subset | **0.056** |
+
+The task those annotators performed was *easier* than ours: verifying a proposed mapping, not
+assigning one of six categories from a function signature. PrivDev's authors describe their own
+article IRIs as "**review cues, not legal determinations of applicability**" — which is the
+opposing side's own wording for *propose, do not assert*.
+
+**GDPR-Bench-Android** benchmarks precisely what §5 Step 3 proposed to build — assigning
+regulatory article labels to code. Across 1,951 instances, 23 articles and 11 methods including
+eight frontier LLMs:
+
+| | |
+|---|---|
+| Best of eleven, multi-label article classification | **5.75% macro-F1** |
+| Deterministic AST — the only paradigm our stdlib constraint permits | **1.86%, worst of the eleven** |
+
+For **one** regulation. This project proposed four.
+
+## 2. The project's own source already decided this
+
+`taxonomy/policies.py`, verbatim:
+
+> A category answers one question — *has this function been classified?* — and **deliberately
+> carries no threshold, citation or amount**. Legal content lives in
+> `finagent_safeguard.regulation.registry`, where every number has provenance and every
+> quotation is machine-checked against pinned text.
+>
+> Keeping that boundary is what stops the project **reproducing its own original error in a
+> tidier wrapper**: an enum member asserting "SCA above EUR 30" would be just as unverified as
+> the YAML key it replaced.
+
+The proposal in §6 — bind each asserted category to a pinned verbatim provision — is the thing
+this docstring was written to forbid, and it names the reason: the invented €30 SCA threshold
+that founded this project. Verified by reading the file: `policies.py` and `registry.py` are
+**completely disconnected**, and the only link between them is that prose sentence. The
+separation is deliberate, documented, and correct.
+
+## 3. Verified in this repository
+
+| Claim | Status |
+|---|---|
+| `registry.py` is 889 lines with **zero** `FinancialCategory` references | **Confirmed** |
+| Three of the four unreachable members appear **exactly once** — their own enum line | **Confirmed** |
+| Nothing anywhere branches on *which* category it is | **Confirmed.** The only two occurrences are an error-message template and emitted source text. `_require_classification` unions the set and tests `registration is None` |
+| Replacing all six categories with one `CLASSIFIED` breaks no test, gate or report field | **Confirmed** |
+| The 23 pinned provisions are duties, with **no scope or definitions provision** among them | **Confirmed.** No PSD2 Art 3 (exclusions), no Art 4 (what a payment service *is*) — exactly what deciding a category would require |
+
+The last row is the quiet one. To assert that a function falls under PSD2 you need the scope
+and definition provisions. We pinned what an obliged entity must *do* and never what brings it
+*into scope*.
+
+## 4. Why `--fix` does not rescue the labelling burden
+
+This was the strongest argument for propose/assert, and the evidence is against it.
+
+| Evidence | Finding |
+|---|---|
+| Rak-amnouykit et al., DLS 2020 | **2,678 of 70,826** GitHub Python repos carry any PEP 484 annotation (3.8%); only 15% of those type-check clean |
+| Dropbox's ~4M annotated lines | The mechanism was a **CI ratchet** ("we gradually increased strictness requirements for new code") plus prioritising by fan-in — enforcement, not precision |
+| **PyAnnotate**, the mypy team's own auto-inserting tool | "Didn't see much adoption"; "in the end, most of the code was manually annotated by code owners" |
+| Checker Framework whole-program inference, ASE 2023 | A *sound* inference engine recovered only **39%** of human annotations; one project got 38% worse |
+| FSE 2025 suppression study | 7,357 suppressions across 46 Python projects, continuously increasing, **50.8% suppress no warning at all** |
+| Google Tricorder | Build-breaking analyses need "essentially zero" false-positive rate; ≥10% not-useful puts an analysis on probation, ≥25% switches it off. Developers experience "supply me an annotation" **as** a false positive — which is what `REVIEW_REQUIRED` is |
+
+The automated writer is the part of our tool that already works, and it is not the part that
+decides adoption.
+
+## 5. And the proposal's real danger, conceded by its own defender
+
+> Today `transfer_focus → PSD2_PAYMENT` is obviously a wordlist's output. Under this design a
+> human writes it, with a CELEX pin and Article 97 quoted beside it, and an auditor will trust
+> it more and be wrong to.
+
+Supported by the automation-bias literature (Parasuraman & Riley 1997; Skitka 1999; Goddard
+2012) and by Perry et al. (arXiv `2211.03622`), who found developers with an AI assistant wrote
+**less** secure code and were **more** confident it was secure. A citation does not make a
+label correct; it makes a wrong label harder to question.
+
+## 6. Agreed plan, revised
+
+**The tool proposes. It never asserts a category. Categories are not bound to citations.**
+
+### Step 0 — dual-scheme agreement pilot (2 days) — unchanged in position, widened in scope
+
+Label one sample twice: binary (regulated / not) and 6-way. Report Krippendorff's α and Gwet's
+AC1 for both, with intervals. Three outcomes, all actionable:
+
+| Result | Consequence |
+|---|---|
+| binary high, 6-way low | Collapse the taxonomy. Ship the negative result — it is a stronger portfolio artefact than a 5.75% classifier |
+| both low | The detector is the whole product |
+| 6-way holds | Only then is category work justified |
+
+It costs 2 days and gates 19–30. Sample must be balanced across categories, because skew
+inflates chance agreement and widens the interval past usefulness — demonstrated by
+`tools/kappa.py`, where 92.5% raw agreement yielded κ = 0.372 with an interval of −0.31 to 1.06.
+
+### Step 1 — fix the detector (3–4 days). Necessary under every outcome
+
+It is broken in both directions: **51 flags / 0 correct** on stdlib, and **0 of 66** real
+ISO 20022 payment functions detected. Multi-label; delete the first-match tie-break; add
+`NOT_REGULATED`; stop treating bare `Decimal` as evidence; negative lookarounds for `address`,
+`pan`, `transaction`, `cpr` as CodeQL and Privado already ship.
+
+### Step 2 — `--fix` writes `REVIEW_REQUIRED`, never a guessed category (1–2 days)
+
+Not a `FinancialCategory` member — a separate state meaning *the tool refused*, which fails CI.
+As an enum member it becomes a value a developer can hand-write, i.e. a silent exemption: the
+bug class this linter has already fought three times.
+
+### Step 3 — rank the worklist by fan-in (3–5 days)
+
+The 80/20 of call-graph propagation, and the mechanism Dropbox actually credits. Full
+cross-module propagation (10–20 days, high variance) is **deferred**, and its absence stated
+plainly rather than implied.
+
+### Step 4 — CI ratchet on diff-touched functions (2–3 days)
+
+Enforcement is the variable that moved adoption from 3.8% to 4M lines. A whole-repo gate on a
+brownfield codebase is a gate that gets switched off.
+
+### Step 5 — evaluate the heuristic as a *ranker*, not a classifier (3–4 days)
+
+precision@k over ~200 hand-labelled functions. This is the honest modelling contribution:
+training a classifier on labels with α = 0.251 measures the annotator. Measuring how far a
+name-based heuristic gets you as a *worklist* is a real, publishable result, and it is the
+question the project can actually answer.
+
+**Total 14–20 days**, against 26–30 for the rejected proposal, with the deleted work being the
+part the evidence says would not have worked.
+
+## 7. Novelty, final position
+
+| Claim | Status |
+|---|---|
+| Verbatim regulatory text bound to code annotations | **Dropped.** NIST OSCAL already ships SP 800-53 as verbatim normative prose with stable per-subitem ids |
+| Citing regulation from a scanner finding | **Dropped.** Privado has a `law` tag; DPV has article IRIs plus curated paraphrase; PrivDev maps findings to provisions |
+| Pinned verbatim spans of **PSD2 / AMLR / DORA** | **Stands.** Verified first-hand: DPV 2.3 `legal/eu/` contains aiact, dga, ehds, gdpr, nis2 — and none of the three financial instruments. No code-level or vocabulary-level treatment of EU financial law was found |
+| Automated insertion with write guards | **Retracted** in §9 above |
+
+The surviving claim is narrow: a machine-checked corpus of pinned EU **financial** provisions,
+and an honest measurement of how far static signals get you toward using it. That is smaller
+than what was proposed, and it is true.
+
+## 8. Still unverified, and recorded as such
+
+- The 16,800-file fuzz result for the write path is from an earlier session and was **not
+  re-run** during this review. It should be re-run before being quoted publicly.
+- Whether the Turku authors' 2022 SoSyM paper generates LPL policies carrying article-level
+  citations. Springer serves an HTML interstitial to automated clients despite the CC-BY
+  licence.
+- Johnson 2013, Bessey 2010 and Sadowski CACM 2018 are Crossref-verified to exist, but ACM is
+  unreachable from this environment, so no numbers are quoted from them.
