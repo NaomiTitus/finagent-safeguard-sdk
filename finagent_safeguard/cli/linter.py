@@ -149,13 +149,41 @@ def _words(name: str) -> set[str]:
     return {p for p in parts if p}
 
 
+#: Module names that can legitimately provide ``overload``.
+_TYPING_MODULES = frozenset({"typing", "typing_extensions"})
+
+
+def _word_sequence(name: str) -> list[str]:
+    """The identifier's words in reading order, for multi-word token matching."""
+    split = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()
+    return [p for p in re.split(r"[^a-z0-9]+", split) if p]
+
+
 def _matches_tokens(name: str, tokens: frozenset[str]) -> bool:
+    """True if the identifier's words contain a token.
+
+    A multi-word token must appear as a run of whole words. The previous
+    substring test matched any identifier merely *containing* the characters,
+    so the token "national_id" fired on "international_ideas" -- a false
+    positive that would have inserted a GDPR category on unrelated code. The
+    companion branch tested a sorted-and-rejoined form, which can never equal
+    a token written in reading order, so it was dead.
+    """
     words = _words(name)
     if words & tokens:
         return True
-    # Multi-word tokens such as "national_id" are matched against the joined form.
-    joined = "_".join(sorted(words))
-    return any("_" in token and token in name.lower() for token in tokens) or joined in tokens
+    sequence = _word_sequence(name)
+    for token in tokens:
+        parts = [p for p in token.split("_") if p]
+        if len(parts) < 2:
+            continue
+        width = len(parts)
+        if any(
+            sequence[i : i + width] == parts
+            for i in range(len(sequence) - width + 1)
+        ):
+            return True
+    return False
 
 
 def _annotation_names(node: ast.AST) -> set[str]:
@@ -234,8 +262,25 @@ def _category_for(names: set[str]) -> str:
     return "PSD2_PAYMENT_EXECUTION"
 
 
+def _overload_names(tree: ast.AST) -> set[str]:
+    """Local names that really are ``typing.overload``.
+
+    Matching the bare name "overload" meant any unrelated decorator of that
+    name suppressed the finding -- a silent exemption a developer could create
+    by accident. A dotted ``@typing.overload`` is handled separately, by
+    attribute, since ``import typing`` binds only the module name.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in _TYPING_MODULES:
+            for alias in node.names:
+                if alias.name == "overload":
+                    names.add(alias.asname or "overload")
+    return names
+
+
 def _is_runtime_discarded(
-    node: ast.FunctionDef | ast.AsyncFunctionDef, aliases: set[str]
+    node: ast.FunctionDef | ast.AsyncFunctionDef, overload_names: set[str]
 ) -> bool:
     """True for a stub whose decorator never runs.
 
@@ -244,7 +289,18 @@ def _is_runtime_discarded(
     classified while the live implementation is bare. The tool would be
     manufacturing the exact invisible false negative it exists to prevent.
     """
-    return any(_decorator_name(d) == "overload" for d in node.decorator_list)
+    for decorator in node.decorator_list:
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if isinstance(target, ast.Name) and target.id in overload_names:
+            return True
+        if (
+            isinstance(target, ast.Attribute)
+            and target.attr == "overload"
+            and isinstance(target.value, ast.Name)
+            and target.value.id in _TYPING_MODULES
+        ):
+            return True
+    return False
 
 
 def _signal_for(
@@ -290,6 +346,7 @@ def scan_source(source: str, path: Path) -> list[Finding]:
     findings: list[Finding] = []
 
     aliases = _classifier_aliases(tree)
+    overload_names = _overload_names(tree)
 
     def walk(node: ast.AST, prefix: str) -> None:
         for child in ast.iter_child_nodes(node):
@@ -297,7 +354,7 @@ def scan_source(source: str, path: Path) -> list[Finding]:
                 walk(child, f"{prefix}{child.name}.")
             elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 if not _is_classified(child, aliases) and not _is_runtime_discarded(
-                    child, aliases
+                    child, overload_names
                 ):
                     matched = _signal_for(child, bank=bank)
                     if matched is not None:
@@ -398,14 +455,6 @@ def _render_decorator(finding: Finding) -> str:
         f"  # TODO(finagent): inserted by linter from the {finding.signal!r} "
         "signal; confirm the category"
     )
-
-
-def _function_names(source: str, path: Path) -> set[str]:
-    out: set[str] = set()
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            out.add(node.name)
-    return out
 
 
 def _import_insert_index(source: str, lines: list[str]) -> int:

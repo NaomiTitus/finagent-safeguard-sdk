@@ -365,3 +365,62 @@ class TestDetectionLineModel:
             "    def transfer(self, amount):\n        pass\n",
         )
         assert found[0].indent == "    "
+
+
+class TestMultiWordTokens:
+    """A multi-word token must match whole words, not characters."""
+
+    @pytest.mark.parametrize(
+        "param,expected",
+        [
+            ("national_id", True),
+            ("nationalId", True),
+            ("my_national_id", True),
+            ("international_ideas", False),
+            ("national_ideas", False),
+            ("nationality", False),
+        ],
+    )
+    def test_substring_does_not_count_as_a_match(
+        self, tmp_path: Path, param: str, expected: bool
+    ) -> None:
+        """The token "national_id" fired on "international_ideas", which would
+        have written a GDPR category onto unrelated code."""
+        from finagent_safeguard.cli.linter import _matches_tokens
+
+        assert _matches_tokens(param, frozenset({"national_id"})) is expected
+
+
+class TestOverloadResolution:
+    """`@overload` exempts a stub -- but only the real one."""
+
+    @pytest.mark.parametrize(
+        "header,decorator",
+        [
+            ("from typing import overload\n", "@overload"),
+            ("from typing_extensions import overload\n", "@overload"),
+            ("import typing\n", "@typing.overload"),
+            ("from typing import overload as ov\n", "@ov"),
+        ],
+    )
+    def test_the_real_overload_exempts_the_stub(
+        self, tmp_path: Path, header: str, decorator: str
+    ) -> None:
+        found = _findings(
+            tmp_path,
+            f"{header}\n{decorator}\ndef transfer(amount, iban):\n    pass\n",
+        )
+        assert found == []
+
+    def test_a_local_decorator_named_overload_does_not_exempt(
+        self, tmp_path: Path
+    ) -> None:
+        """Matching the bare name meant any unrelated decorator called
+        `overload` silently exempted a money-handling function -- an invisible
+        false negative a developer could create by accident."""
+        found = _findings(
+            tmp_path,
+            "def overload(f):\n    return f\n\n\n"
+            "@overload\ndef transfer(amount, iban):\n    pass\n",
+        )
+        assert [f.function for f in found] == ["transfer"]

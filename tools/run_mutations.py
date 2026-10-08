@@ -191,10 +191,19 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
     ),
     "L15": (
         LINT,
-        '    return any(_decorator_name(d) == "overload" for d in node.decorator_list)',
-        '    return False',
-        "test_an_overload_stub_is_not_flagged",
-        "decorate an @overload stub, which is discarded at runtime",
+        '        if isinstance(target, ast.Name) and target.id in overload_names:',
+        '        if isinstance(target, ast.Name) and target.id == "overload":',
+        "test_a_local_decorator_named_overload_does_not_exempt",
+        "trust the bare name overload, so any local decorator of that name "
+        "silently exempts a money-handling function",
+    ),
+    "L26": (
+        LINT,
+        '        parts = [p for p in token.split("_") if p]',
+        '        parts = [token]',
+        "test_substring_does_not_count_as_a_match",
+        "stop splitting multi-word tokens into words, so matching falls "
+        "back to a substring test",
     ),
     "L16": (
         LINT,
@@ -324,6 +333,7 @@ BASELINE: dict[str, str] = {
     "L23": "caught",
     "L24": "caught",
     "L25": "caught",
+    "L26": "caught",
 }
 
 
