@@ -34,28 +34,7 @@ PRICES = {
 OUTPUT_PER_CALL = 2000  # thinking + verdict, at effort=high. A judgement call.
 
 
-def render_claim(provision: object) -> str:
-    """The claim as the judge sees it: what the registry asserts about this text."""
-    lines = [f"Provision cited: {provision.id}"]  # type: ignore[attr-defined]
-    if provision.obligation_text:  # type: ignore[attr-defined]
-        lines.append(f'Quoted as: "{provision.obligation_text}"')  # type: ignore[attr-defined]
-    for obligation in REGISTRY.obligations():
-        if obligation.provision is provision:
-            lines.append(f"Asserted addressee: {obligation.addressee}")
-            lines.append(f"Enforcing: {obligation.enforcing}")
-    for exemption in REGISTRY.exemptions():
-        if exemption.provision is provision:
-            lines.append(f"Asserted effect: {exemption.effect}")
-            for limb in exemption.limbs:
-                lines.append(f"  limb {limb.name} = {limb.as_cited} ({limb.provenance})")
-    for param in REGISTRY.numeric_parameters():
-        if param.locus is provision:
-            lines.append(f"Numeral {param.name} = {param.as_cited} ({param.provenance})")
-    for point in REGISTRY.reference_points():
-        if point.parameter.locus is provision:
-            lines.append(f"Reference point governs: {point.governs}")
-            lines.append(f"Operative: {point.operative}")
-    return "\n".join(lines)
+from tools.entailment import render_claim  # single source of truth
 
 
 def main() -> int:
