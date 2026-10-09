@@ -55,6 +55,22 @@ def _added_definitions(base: str) -> dict[str, set[str]]:
         text=True,
     ).stdout
 
+    # A new file git has never seen does not appear in `git diff`, so an entire
+    # module could ship with nothing proving any of it works and this check
+    # would say nothing. Found by this script failing to mention a module that
+    # had just been written -- the battery's own blind spot, of exactly the
+    # class it exists to catch.
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "finagent_safeguard"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    for path in untracked:
+        if path.endswith(".py"):
+            body = (ROOT / path).read_text()
+            diff += f"+++ b/{path}\n" + "".join(f"+{line}\n" for line in body.splitlines())
+
     added: dict[str, set[str]] = {}
     current = ""
     for line in diff.splitlines():

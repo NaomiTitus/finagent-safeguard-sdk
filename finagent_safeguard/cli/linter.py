@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from finagent_safeguard.regulation.candidates import candidates_for, cite
 from finagent_safeguard.taxonomy.policies import FinancialCategory
 
 __all__ = [
@@ -497,21 +498,45 @@ class FixResult:
     functions: list[str]
 
 
-def _render_decorator(finding: Finding) -> str:
-    """The decorator line, which names no regulation.
+def _render_annotation(finding: Finding) -> list[str]:
+    """The decorator line plus the candidate provisions, unindented.
 
-    It used to write a guessed category with "confirm the category" appended,
-    which got the emphasis exactly wrong: the guess looked like the answer and
-    the confirmation looked like paperwork. Measured, that guess was inverted
-    on real code -- a GUI focus handler filed as a payment, real ISO 20022
-    payment builders not flagged at all.
+    Several lines rather than one, because a bare category name told a
+    developer nothing they could act on. It used to write a guessed category
+    with "confirm the category" appended, which got the emphasis exactly wrong:
+    the guess read as the answer and the confirmation as paperwork. Measured,
+    that guess was inverted on real code -- a GUI focus handler filed as a
+    payment, real ISO 20022 payment builders not flagged at all.
+
+    Now it names the evidence, lists the provisions worth reading, and asks for
+    the one judgement a static tool cannot make. The candidates are pinned
+    text: each is committed under ``corpus/`` with a SHA-256 and audited by
+    ``tools/check_entailment.py``.
+
+    Comments sit between the decorator and the ``def``, which is legal Python
+    and keeps the reason adjacent to the thing it explains. The write guards are
+    unaffected: extra comment lines are still a pure insertion and add no
+    functions.
     """
     matched = "+".join(finding.vocabularies) or finding.signal
-    return (
-        f"@regulated_tool(FinancialCategory.{finding.category})"
-        f"  # finagent-lint: {matched} identifiers, {finding.signal} signal."
-        " Replace with the category you have confirmed."
+    out = [
+        f"@regulated_tool(FinancialCategory.{finding.category})",
+        f"# finagent-lint: {matched} identifiers, {finding.signal} signal.",
+    ]
+    found = candidates_for(finding.vocabularies)
+    if found:
+        out.append("#   candidates to read before deciding:")
+        for candidate in found:
+            out.append(f"#     {cite(candidate.provision)} - {candidate.requires}")
+    else:
+        out.append(
+            "#   no candidate provision: the signal is reachability alone, "
+            "which evidences no particular duty."
+        )
+    out.append(
+        f"# Replace {finding.category} with the category you have confirmed."
     )
+    return out
 
 
 def _import_insert_index(source: str, lines: list[str]) -> int:
@@ -724,10 +749,10 @@ def plan_fix(path: Path, findings: list[Finding]) -> FixPlan:
         # Borrow the terminator of the line being pushed down, so the inserted
         # line matches its neighbours rather than a file-wide guess.
         term = _terminator(lines[finding.insert_line - 1])
-        lines.insert(
-            finding.insert_line - 1,
-            finding.indent + _render_decorator(finding) + term,
-        )
+        block = [
+            finding.indent + line + term for line in _render_annotation(finding)
+        ]
+        lines[finding.insert_line - 1 : finding.insert_line - 1] = block
     needed = _missing_imports(text)
     if needed:
         at = _import_insert_index(text, lines)

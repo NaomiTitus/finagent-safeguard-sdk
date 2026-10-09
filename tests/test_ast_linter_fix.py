@@ -31,14 +31,24 @@ def _fix(path: Path) -> linter.FixResult:
 
 
 class TestInsertion:
-    def test_inserts_the_decorator_above_the_def(self, tmp_path: Path) -> None:
+    def test_the_decorator_attaches_to_the_function(self, tmp_path: Path) -> None:
+        """Asserted through the parsed tree rather than by line position.
+
+        The annotation is now several lines -- decorator, then the candidate
+        provisions -- so the line immediately above the ``def`` is a comment.
+        Position was always a proxy for the property that matters, which is
+        that Python binds the decorator to that function, and the tree answers
+        that directly. Comments between a decorator and a ``def`` are legal.
+        """
         p = tmp_path / "m.py"
         p.write_text(SIMPLE)
         _fix(p)
-        lines = p.read_text().splitlines()
-        assert lines[-3].startswith("@regulated_tool(")
-        assert lines[-2].startswith("def transfer")
-        assert lines[-1] == "    pass"
+        body = p.read_text()
+        attached = linter.decorators_by_qualname(body)
+        assert any(
+            d.startswith("regulated_tool(") for d in attached["transfer"]
+        ), attached
+        assert body.rstrip().endswith("    pass")
 
     def test_inserts_above_existing_decorators(self, tmp_path: Path) -> None:
         p = tmp_path / "m.py"
@@ -74,10 +84,11 @@ class TestInsertion:
             "def three(payee: str) -> None:\n    pass\n"
         )
         _fix(p)
-        out = p.read_text().splitlines()
-        for i, line in enumerate(out):
-            if line.startswith("def "):
-                assert out[i - 1].startswith("@regulated_tool("), line
+        attached = linter.decorators_by_qualname(p.read_text())
+        for name in ("one", "two", "three"):
+            assert any(
+                d.startswith("regulated_tool(") for d in attached[name]
+            ), f"{name} lost its decorator: {attached}"
 
     def test_adds_the_imports_once(self, tmp_path: Path) -> None:
         p = tmp_path / "m.py"
@@ -137,7 +148,7 @@ class TestSafety:
         p.write_text(SIMPLE)
         before = p.read_bytes()
         monkeypatch.setattr(
-            linter, "_render_decorator", lambda finding: "def sabotage(): pass"
+            linter, "_render_annotation", lambda finding: ["def sabotage(): pass"]
         )
         with pytest.raises(linter.UnsafeEdit):
             _fix(p)
