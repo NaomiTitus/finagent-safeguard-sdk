@@ -133,6 +133,11 @@ class Finding:
     #: between a tab and a space, so a tab-indented class produced
     #: "inconsistent use of tabs and spaces" and had to be refused.
     indent: str
+    #: Last line of the function, so a ratchet can ask whether any of it was
+    #: touched. ``insert_line`` alone would only answer "was the signature
+    #: edited", and a payment body rewritten under an untouched signature is
+    #: exactly the change that most needs classifying.
+    end_line: int
     #: Which signal fired. Reported so a developer can judge a false positive.
     signal: str
     #: What --fix writes after ``FinancialCategory.``. Always
@@ -411,6 +416,7 @@ def scan_source(source: str, path: Path) -> list[Finding]:
                                 path=path,
                                 function=f"{prefix}{child.name}",
                                 insert_line=line,
+                                end_line=child.end_lineno or line,
                                 indent=leading,
                                 signal=signal,
                                 category=PROPOSED_CATEGORY,
@@ -896,6 +902,79 @@ def unresolved_functions(source: str) -> list[str]:
     return out
 
 
+_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+def changed_lines(base: str, paths: list[str]) -> dict[Path, set[int]] | None:
+    """Line numbers touched since ``base``, per file. None if git cannot answer.
+
+    This is what makes the gate adoptable. A linter run over a brownfield
+    codebase flags every pre-existing regulated function, exits non-zero
+    forever, and gets switched off -- and then it is protecting nothing. The
+    measured version of that: 2,678 of 70,826 GitHub Python repositories carry
+    any PEP 484 annotation, while Dropbox reached roughly four million
+    annotated lines, and what they credit is raising strictness *for new code*
+    rather than demanding the whole tree at once.
+
+    Returns None rather than an empty mapping when git fails, because the two
+    mean opposite things: "nothing changed" should suppress every finding,
+    while "I cannot tell what changed" must suppress none.
+    """
+    import subprocess
+
+    try:
+        done = subprocess.run(
+            ["git", "diff", "--unified=0", base, "--", *paths],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+
+    touched: dict[Path, set[int]] = {}
+    current: Path | None = None
+    for line in done.stdout.splitlines():
+        if line.startswith("+++ b/"):
+            current = Path(line[6:])
+            touched.setdefault(current, set())
+            continue
+        if current is None:
+            continue
+        found = _HUNK.match(line)
+        if found:
+            start = int(found.group(1))
+            count = int(found.group(2) or 1)
+            # A pure deletion reports a count of 0 at the line it was removed
+            # from. Nothing there now needs classifying, so it adds no lines.
+            touched[current].update(range(start, start + count))
+    return touched
+
+
+def _touched(finding: Finding, touched: dict[Path, set[int]]) -> bool:
+    """Did the diff reach any line of this function?
+
+    Resolved against both the path as given and its absolute form, because git
+    reports paths relative to the repository root while the linter is handed
+    whatever the caller typed.
+    """
+    for key in (finding.path, Path(*finding.path.parts[-len(finding.path.parts):])):
+        lines = touched.get(key)
+        if lines is None:
+            for candidate, found in touched.items():
+                if str(finding.path).endswith(str(candidate)):
+                    lines = found
+                    break
+        if lines is not None:
+            return any(
+                line in lines
+                for line in range(finding.insert_line, finding.end_line + 1)
+            )
+    return False
+
+
 def _python_files(paths: list[str]) -> tuple[list[Path], list[str]]:
     """Expand arguments into files, and report what could not be used.
 
@@ -957,6 +1036,14 @@ def main(argv: list[str] | None = None) -> int:
         help="print the edit --fix would make, and write nothing",
     )
     parser.add_argument(
+        "--since",
+        metavar="REF",
+        help=(
+            "only count findings in code touched since REF (e.g. origin/main). "
+            "Pre-existing findings are still reported, never silently dropped."
+        ),
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help=f"also fail on advisory signals ({', '.join(sorted(ADVISORY_SIGNALS))})",
@@ -966,6 +1053,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.fix and args.diff_only:
         parser.error("--fix and --diff-only are contradictory; pick one")
 
+    touched: dict[Path, set[int]] | None = None
+    if args.since:
+        touched = changed_lines(args.since, args.paths or ["."])
+        if touched is None:
+            # Not a warning to be skimmed past: without a diff the ratchet
+            # cannot tell new code from old, and silently counting everything
+            # would turn an adoption aid into a surprise wall of failures.
+            print(
+                f"error: cannot diff against {args.since!r}; is it a valid git "
+                "ref in this repository?",
+                file=sys.stderr,
+            )
+            return 2
+
     files, problems = _python_files(args.paths or ["."])
     for problem in problems:
         print(f"error: {problem}", file=sys.stderr)
@@ -974,7 +1075,9 @@ def main(argv: list[str] | None = None) -> int:
 
     actionable = 0
     advisory = 0
+    pre_existing = 0
     unresolved_total = 0
+    unresolved_pre_existing = 0
     written = 0
     failures: list[str] = []
 
@@ -999,13 +1102,26 @@ def main(argv: list[str] | None = None) -> int:
             continue
 
         for name in still_open:
-            unresolved_total += 1
-            print(f"  {path}: {name} carries {_UNRESOLVED}; confirm the category")
+            # An unresolved flag outside the diff is somebody else's backlog.
+            # It is printed either way; only whether it fails the build changes.
+            outside = touched is not None and not any(
+                _touched(f, touched) for f in findings if f.function == name
+            )
+            if outside:
+                unresolved_pre_existing += 1
+                print(f"  {path}: {name} carries {_UNRESOLVED} (pre-existing)")
+            else:
+                unresolved_total += 1
+                print(f"  {path}: {name} carries {_UNRESOLVED}; confirm the category")
 
         if not findings:
             continue
 
         for finding in findings:
+            if touched is not None and not _touched(finding, touched):
+                pre_existing += 1
+                print(_describe(finding) + " (pre-existing)")
+                continue
             if finding.signal in ADVISORY_SIGNALS:
                 advisory += 1
             else:
@@ -1032,12 +1148,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {failure}", file=sys.stderr)
 
     counted = actionable + (advisory if args.strict else 0)
-    print(
+    summary = (
         f"\n{len(files)} file(s) scanned. "
         f"{actionable} actionable, {advisory} advisory, "
         f"{unresolved_total} unresolved."
-        + (f" {written} flag(s) written." if args.fix else "")
     )
+    if args.fix:
+        summary += f" {written} flag(s) written."
+    if touched is not None:
+        # Counted and named. A ratchet that hides the backlog is a blindfold,
+        # and the number is the only honest measure of how much there is to do.
+        summary += (
+            f"\n{pre_existing} finding(s) and {unresolved_pre_existing} "
+            f"unresolved flag(s) are outside the diff against {args.since} "
+            "and do not fail this run. Drop --since to see the whole tree."
+        )
+    print(summary)
 
     if failures:
         # A file the tool could not read or parse is not a clean file. Reporting

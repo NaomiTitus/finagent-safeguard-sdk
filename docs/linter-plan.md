@@ -49,7 +49,7 @@ premise of the tool, not buried as a caveat.
 | 1 | `REVIEW_REQUIRED` in the enum; agent gate rejects it; strengthen the write guard | ~2 hrs, then the CLI |
 | 1 | CLI entry point: `finagent-lint [PATHS] [--fix] [--diff-only] [--strict]` | exit 0 clean, 1 unresolved, 2 invocation error |
 | 2 | Signal -> candidate provision mapping | pinned provisions only |
-| 3 | `--fix` emits the flag plus candidate citations; diff-only ratchet | extend `plan_fix`/`apply_fix`, do not rewrite |
+| 3 | ~~`--fix` emits the flag plus candidate citations; diff-only ratchet~~ **done** | `--since REF` ratchets on touched lines, not touched files |
 | 4 | Corpus harvest, pointer-only | licences verified below |
 | 5 | **Owner labels 150 functions, ~2 hrs**, labels frozen and committed | 20 of them twice, a day apart |
 | 6 | Train the binary ranker, measure, write up | |

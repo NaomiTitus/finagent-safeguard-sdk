@@ -163,3 +163,149 @@ class TestAdvisorySignals:
         """An empty set would silently make --strict meaningless and every
         advisory finding build-breaking."""
         assert ADVISORY_SIGNALS
+
+
+class TestTheDiffRatchet:
+    """`--since REF` counts only findings in code the diff touched.
+
+    This is what makes the gate adoptable rather than merely correct. Run over
+    a brownfield codebase the linter flags every pre-existing regulated
+    function, exits non-zero forever, and gets switched off -- at which point
+    it protects nothing. Measured: 2,678 of 70,826 GitHub Python repositories
+    carry any PEP 484 annotation, while Dropbox reached roughly four million
+    annotated lines, and what they credit is raising strictness for *new* code.
+    """
+
+    @staticmethod
+    def _repo(root: Path) -> None:
+        import subprocess
+
+        def git(*args: str) -> None:
+            subprocess.run(
+                ["git", *args], cwd=root, check=True, capture_output=True
+            )
+
+        git("init", "-q", ".")
+        git("config", "user.email", "t@t")
+        git("config", "user.name", "t")
+        (root / "legacy.py").write_text(
+            "from decimal import Decimal\n\n\n"
+            "def old_transfer(debtor_iban: str, amount: Decimal) -> None:\n"
+            "    pass\n\n\n"
+            "def old_profile(email: str, personnummer: str) -> None:\n"
+            "    pass\n"
+        )
+        git("add", "-A")
+        git("commit", "-q", "-m", "base")
+
+    @staticmethod
+    def _commit(root: Path, body: str, message: str) -> None:
+        import subprocess
+
+        (root / "legacy.py").write_text(body)
+        for args in (["add", "-A"], ["commit", "-q", "-m", message]):
+            subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+    def _run(self, root: Path, *extra: str) -> int:
+        import os
+
+        cwd = Path.cwd()
+        try:
+            os.chdir(root)
+            return main(["legacy.py", *extra])
+        finally:
+            os.chdir(cwd)
+
+    def test_without_the_ratchet_the_whole_tree_fails(self, tmp_path: Path) -> None:
+        self._repo(tmp_path)
+        assert self._run(tmp_path) == 1
+
+    def test_editing_a_regulated_function_fails(self, tmp_path: Path) -> None:
+        """The body changed under an untouched signature, which is exactly the
+        change most worth classifying -- and the change a signature-only
+        ratchet would wave through."""
+        self._repo(tmp_path)
+        body = (tmp_path / "legacy.py").read_text().replace(
+            "def old_transfer(debtor_iban: str, amount: Decimal) -> None:\n    pass",
+            "def old_transfer(debtor_iban: str, amount: Decimal) -> None:\n    audit(amount)",
+        )
+        self._commit(tmp_path, body, "touch one")
+        assert self._run(tmp_path, "--since", "HEAD~1") == 1
+
+    def test_editing_unrelated_code_passes(self, tmp_path: Path) -> None:
+        """The property the whole feature exists for: honest work on an
+        unannotated codebase is not blocked by somebody else's backlog."""
+        self._repo(tmp_path)
+        body = (tmp_path / "legacy.py").read_text() + (
+            "\n\ndef add_docs(text: str) -> str:\n    return text\n"
+        )
+        self._commit(tmp_path, body, "unrelated")
+        assert self._run(tmp_path, "--since", "HEAD~1") == 0
+
+    def test_pre_existing_findings_are_still_printed(
+        self, tmp_path: Path, capsys
+    ) -> None:  # type: ignore[no-untyped-def]
+        """A ratchet that hides the backlog is a blindfold. The count is the
+        only honest measure of how much there is to do."""
+        self._repo(tmp_path)
+        body = (tmp_path / "legacy.py").read_text() + (
+            "\n\ndef add_docs(text: str) -> str:\n    return text\n"
+        )
+        self._commit(tmp_path, body, "unrelated")
+        self._run(tmp_path, "--since", "HEAD~1")
+        out = capsys.readouterr().out
+        assert "pre-existing" in out
+        assert "old_transfer" in out
+        assert "outside the diff" in out
+
+    def test_an_unusable_ref_is_two_not_a_silent_pass(self, tmp_path: Path) -> None:
+        """"Nothing changed" and "I cannot tell what changed" mean opposite
+        things. Treating the second as the first would suppress every finding
+        and report success."""
+        self._repo(tmp_path)
+        assert self._run(tmp_path, "--since", "no-such-ref") == 2
+
+    def test_a_deletion_next_to_a_regulated_function_does_not_pull_it_in(
+        self, tmp_path: Path
+    ) -> None:
+        """A pure deletion reports a hunk count of 0 at the line it vacated.
+
+        Deliberately adjacent: the deleted comment sat immediately above
+        `old_transfer`, so a hunk widened by even one line would reach its
+        signature and the ratchet would demand classification for a function
+        nobody touched. Testing a deletion in the middle of a file passes
+        whether or not that bug is present, which is how the first version of
+        this test let a mutation survive.
+        """
+        import subprocess
+
+        subprocess.run(["git", "init", "-q", "."], cwd=tmp_path, check=True, capture_output=True)
+        for args in (["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+            subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+        (tmp_path / "legacy.py").write_text(
+            "from decimal import Decimal\n\n\n"
+            "# a comment that will be deleted\n"
+            "def old_transfer(debtor_iban: str, amount: Decimal) -> None:\n"
+            "    pass\n"
+        )
+        for args in (["add", "-A"], ["commit", "-q", "-m", "base"]):
+            subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+        self._commit(
+            tmp_path,
+            "from decimal import Decimal\n\n\n"
+            "def old_transfer(debtor_iban: str, amount: Decimal) -> None:\n"
+            "    pass\n",
+            "drop the comment",
+        )
+        assert self._run(tmp_path, "--since", "HEAD~1") == 0
+
+    def test_a_deletion_adds_no_lines_to_classify(self, tmp_path: Path) -> None:
+        """A pure deletion reports a hunk count of 0. Nothing is there to
+        classify, so it must not resurrect the neighbouring function."""
+        self._repo(tmp_path)
+        body = (tmp_path / "legacy.py").read_text().replace(
+            "\n\ndef old_profile(email: str, personnummer: str) -> None:\n    pass\n", "\n"
+        )
+        self._commit(tmp_path, body, "delete one")
+        assert self._run(tmp_path, "--since", "HEAD~1") == 0
