@@ -233,6 +233,33 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "the one state that exists to demand human judgement passes the gate "
         "that exists to require it",
     ),
+    # Day 4, the CLI. Layer 1c flagged these as unprotected before they
+    # shipped, for the second time in one day.
+    "C1": (
+        LINT,
+        'ADVISORY_SIGNALS: Final[frozenset[str]] = frozenset({"bank_client_import"})',
+        'ADVISORY_SIGNALS: Final[frozenset[str]] = frozenset()',
+        "test_an_advisory_only_finding_does_not_fail_by_default",
+        "empty the advisory set, making the weakest signal build-breaking by "
+        "default -- 51 flags and 0 correct ones over 155 stdlib modules",
+    ),
+    "C2": (
+        LINT,
+        '        except (UnparseableSource, SyntaxError) as exc:',
+        '        except SyntaxError as exc:',
+        "test_an_unparseable_file_exits_two",
+        "let UnparseableSource escape, crashing the process so that Python's "
+        "exit 1 makes a failed run look like a successful one that found "
+        "something",
+    ),
+    "C3": (
+        LINT,
+        '                            and argument.attr == _UNRESOLVED',
+        '                            and argument.attr == "NOT_A_CATEGORY"',
+        "test_an_unresolved_flag_fails_the_run",
+        "stop recognising REVIEW_REQUIRED in a decorator, so a flagged "
+        "function passes the gate as classified",
+    ),
     "L16": (
         LINT,
         '    if any(_matches_tokens(n, PII_TOKENS) for n in names):\n        return "GDPR_PII_PROCESSING"',
@@ -365,6 +392,9 @@ BASELINE: dict[str, str] = {
     "L27": "caught",
     "L28": "caught",
     "A6": "caught",
+    "C1": "caught",
+    "C2": "caught",
+    "C3": "caught",
 }
 
 
