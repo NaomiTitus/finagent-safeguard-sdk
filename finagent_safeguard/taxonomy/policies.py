@@ -26,3 +26,17 @@ class FinancialCategory(StrEnum):
     GDPR_THIRD_COUNTRY_TRANSFER = "gdpr_third_country_transfer"
     AML_TRANSACTION_MONITORING = "aml_transaction_monitoring"
     DORA_ICT_THIRD_PARTY = "dora_ict_third_party"
+
+    #: Not a category: the linter's refusal to name one.
+    #:
+    #: ``--fix`` writes this when it has found a function that handles money or
+    #: personal data but has no basis to say which regulation applies. It is a
+    #: member of this enum for one reason only -- so the inserted decorator
+    #: imports -- and it is the loudest state the tool can emit, not a quiet
+    #: one: the linter reports it, CI fails on it, and ``_require_classification``
+    #: refuses to start an agent carrying it.
+    #:
+    #: A developer replaces it with the category they have confirmed. That
+    #: confirmation is the judgement no static tool can make, and asking for it
+    #: explicitly is the premise of the tool rather than a caveat on it.
+    REVIEW_REQUIRED = "review_required"

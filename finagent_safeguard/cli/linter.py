@@ -31,6 +31,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from finagent_safeguard.taxonomy.policies import FinancialCategory
+
 __all__ = [
     "Finding",
     "FixPlan",
@@ -435,6 +437,12 @@ CATEGORY_IMPORT: Final = (
 #: Every inserted line carries a TODO so the developer must look at it, which is
 
 
+#: Every name the tool may legally write after ``FinancialCategory.``. Read
+#: from the enum rather than restated, so a member added or renamed there
+#: cannot drift out of step with what the linter will emit.
+_VALID_CATEGORIES: frozenset[str] = frozenset(m.name for m in FinancialCategory)
+
+
 class UnsafeEdit(Exception):
     """The edited source no longer defines the same functions. Nothing written."""
 
@@ -699,6 +707,28 @@ def plan_fix(path: Path, findings: list[Finding]) -> FixPlan:
         raise UnsafeEdit(
             f"{path}: decorator landed on {changed or 'nothing'}, expected "
             f"exactly {intended}. Nothing written."
+        )
+
+    # Fifth guard: the decorator we are about to write must reference a real
+    # enum member.
+    #
+    # The other four check that we did not damage the developer's file. None of
+    # them checks that what we *added* works. A category not present on
+    # FinancialCategory produces a file that parses, keeps every function, is a
+    # pure insertion, and raises AttributeError the moment anyone imports it --
+    # and all four guards reported success while it did so.
+    #
+    # Deliberately static. Verifying importability properly would mean executing
+    # the module, which means executing arbitrary developer code inside a
+    # linter, which is not a trade a linter gets to make. So the check is
+    # narrowed to the one thing the tool itself emits and therefore owns.
+    unknown_categories = sorted(
+        {f.category for f in findings if f.category not in _VALID_CATEGORIES}
+    )
+    if unknown_categories:
+        raise UnsafeEdit(
+            f"{path}: would write FinancialCategory.{unknown_categories[0]}, which "
+            f"is not a member of FinancialCategory. Nothing written."
         )
 
     new_bytes = bom + modified.encode()

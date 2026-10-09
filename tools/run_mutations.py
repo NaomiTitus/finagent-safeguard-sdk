@@ -205,6 +205,34 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "stop splitting multi-word tokens into words, so matching falls "
         "back to a substring test",
     ),
+    # Day 4. REVIEW_REQUIRED and the fifth write guard had no rows at all, and
+    # layer 1c of the review protocol caught that before they shipped: a guard
+    # nothing can prove is working is not protected.
+    "L27": (
+        LINT,
+        '        {f.category for f in findings if f.category not in _VALID_CATEGORIES}',
+        '        set()',
+        "test_an_unknown_category_is_refused",
+        "drop the fifth guard, letting --fix write a category that is not an "
+        "enum member and produce a file that AttributeErrors on import",
+    ),
+    "L28": (
+        LINT,
+        '_VALID_CATEGORIES: frozenset[str] = frozenset(m.name for m in FinancialCategory)',
+        '_VALID_CATEGORIES: frozenset[str] = frozenset({"PSD2_PAYMENT_EXECUTION"})',
+        "test_the_valid_set_is_read_from_the_enum",
+        "restate the member names instead of reading the enum, so the guard "
+        "drifts out of step with what the linter may emit",
+    ),
+    "A6": (
+        AGENT,
+        '        if FinancialCategory.REVIEW_REQUIRED in registration.categories:',
+        '        if False:',
+        "test_a_tool_carrying_it_is_refused",
+        "let the runtime gate accept REVIEW_REQUIRED as a classification, so "
+        "the one state that exists to demand human judgement passes the gate "
+        "that exists to require it",
+    ),
     "L16": (
         LINT,
         '    if any(_matches_tokens(n, PII_TOKENS) for n in names):\n        return "GDPR_PII_PROCESSING"',
@@ -334,6 +362,9 @@ BASELINE: dict[str, str] = {
     "L24": "caught",
     "L25": "caught",
     "L26": "caught",
+    "L27": "caught",
+    "L28": "caught",
+    "A6": "caught",
 }
 
 

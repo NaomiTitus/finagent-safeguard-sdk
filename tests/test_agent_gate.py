@@ -96,3 +96,73 @@ class TestErrorQuality:
         with pytest.raises(UnregulatedToolError) as excinfo:
             BaseCompliantAgent(agent_name="treasury", tools=[unclassified_tool])
         assert not isinstance(excinfo.value, ImportError)
+
+
+class TestReviewRequiredIsNotAClassification:
+    """`REVIEW_REQUIRED` must not satisfy the gate that demands classification.
+
+    It is a member of FinancialCategory for one mechanical reason -- so the
+    decorator the linter writes imports. Treating it as a category here would
+    let the one state that exists to demand human judgement pass the gate that
+    exists to require it. That is the only place human review cannot help: the
+    linter flagged it, CI flagged it, and someone shipped anyway.
+    """
+
+    @staticmethod
+    def _build(tools: list[object]) -> object:
+        return BaseCompliantAgent(agent_name="a", tools=tools)  # type: ignore[arg-type]
+
+    def test_a_tool_carrying_it_is_refused(self) -> None:
+        @dec.regulated_tool(FinancialCategory.REVIEW_REQUIRED)
+        def unresolved(amount: Decimal) -> None: ...
+
+        with pytest.raises(UnregulatedToolError, match="REVIEW_REQUIRED"):
+            self._build([unresolved])
+
+    def test_one_unresolved_tool_blocks_a_whole_agent(self) -> None:
+        """No partial credit: an agent is as classified as its least
+        classified tool."""
+
+        @dec.regulated_tool(FinancialCategory.PSD2_PAYMENT_EXECUTION)
+        def resolved(amount: Decimal) -> None: ...
+
+        @dec.regulated_tool(FinancialCategory.REVIEW_REQUIRED)
+        def unresolved(amount: Decimal) -> None: ...
+
+        with pytest.raises(UnregulatedToolError):
+            self._build([resolved, unresolved])
+
+    def test_stacking_it_with_a_real_category_still_refuses(self) -> None:
+        """A developer part-way through confirming a multi-category function
+        has not finished. Accepting the resolved half would report the agent as
+        classified while a regulatory concern is still unnamed."""
+
+        @dec.regulated_tool(
+            FinancialCategory.PSD2_PAYMENT_EXECUTION,
+            FinancialCategory.REVIEW_REQUIRED,
+        )
+        def half_done(amount: Decimal, surname: str) -> None: ...
+
+        with pytest.raises(UnregulatedToolError, match="REVIEW_REQUIRED"):
+            self._build([half_done])
+
+    def test_the_message_names_the_remedy_not_the_diagnosis(self) -> None:
+        """The developer already has the linter's output in front of them.
+        Telling them to classify the tool is unhelpful; telling them to replace
+        the flag, and that candidates were offered, is not."""
+
+        @dec.regulated_tool(FinancialCategory.REVIEW_REQUIRED)
+        def unresolved(amount: Decimal) -> None: ...
+
+        with pytest.raises(UnregulatedToolError) as caught:
+            self._build([unresolved])
+        message = str(caught.value)
+        assert "is not a classification" in message
+        assert "candidate provisions" in message
+
+    def test_a_resolved_tool_still_passes(self) -> None:
+        @dec.regulated_tool(FinancialCategory.PSD2_PAYMENT_EXECUTION)
+        def resolved(amount: Decimal) -> None: ...
+
+        built = self._build([resolved])
+        assert FinancialCategory.PSD2_PAYMENT_EXECUTION in built.categories  # type: ignore[attr-defined]
