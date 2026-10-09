@@ -54,6 +54,53 @@ jobs:
       - name: Mutation baseline
         run: python3 tools/run_mutations.py --check
 
+  # Layer 1c of the review protocol, enforced. "Does every guard we added have a
+  # mutation row?" is a question about the diff, not the code, so no test could
+  # ask it and nothing did -- it caught three unprotected guards in a single day
+  # and only ever because somebody thought to run it by hand.
+  #
+  # Needs the base ref present, hence fetch-depth 0. On a push to main the diff
+  # is against the previous commit, which is the right question there too.
+  coverage:
+    name: mutation coverage of new code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - name: Every new definition has a mutation row
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || 'HEAD^' }}"
+          python3 tools/battery.py --base "$BASE"
+
+  # The regulatory claims, audited against the verbatim text they cite.
+  #
+  # Reads the committed verdicts only -- no network, no credentials, no spend.
+  # It fails on *drift* against the ACCEPTED baseline in check_entailment.py
+  # rather than demanding every claim be confirmed: fourteen stand at
+  # REVIEW_REQUIRED because the judges agree on the answer and cite different
+  # spans, and one is a genuine interpretive split. A gate that is permanently
+  # red is a gate nobody reads.
+  #
+  # Producing new verdicts needs an API key and is deliberately not done here.
+  # The verdicts are an artefact a human reviews and commits; CI checks that the
+  # artefact still matches the claims.
+  entailment:
+    name: regulatory claims vs pinned text
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - name: Entailment verdicts match the claims
+        run: python3 tools/check_entailment.py --check
+
   # Drift alarm. Goes red with no code change when a regulatory review date passes.
   staleness:
     name: regulatory review dates
