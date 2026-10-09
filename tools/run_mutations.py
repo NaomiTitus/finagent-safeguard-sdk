@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ AGENT = "finagent_safeguard/core/agent.py"
 DECOR = "finagent_safeguard/core/decorators.py"
 REGIS = "finagent_safeguard/regulation/registry.py"
 LINT = "finagent_safeguard/cli/linter.py"
+CAND = "finagent_safeguard/regulation/candidates.py"
 
 # id: (file, find, replace, expected killer, note)
 MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
@@ -293,6 +295,66 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "replace the message that tells a developer what to do with one that "
         "only says something is wrong",
     ),
+    # Day 5. The candidate mapping. Layer 1c found the whole module invisible
+    # to it first -- git diff does not show a file git has never seen -- which
+    # was the battery's own blind spot, of the class it exists to catch.
+    "L31": (
+        LINT,
+        '        out.append("#   candidates to read before deciding:")',
+        '        pass',
+        "test_the_inserted_comment_names_the_evidence_not_a_conclusion",
+        "stop writing the candidate provisions, leaving a developer a flag "
+        "with nothing to act on",
+    ),
+    "D1": (
+        CAND,
+        '            if candidate not in out:',
+        '            if True:',
+        "test_no_duplicates",
+        "stop collapsing duplicates, so a provision reached by two "
+        "vocabularies reads as emphasis nobody intended",
+    ),
+    "D2": (
+        CAND,
+        '        for candidate in CANDIDATES.get(vocabulary, ()):',
+        '        for candidate in next(iter(CANDIDATES.values()), ()):',
+        "test_pii_offers_the_data_protection_provisions",
+        "ignore which vocabulary matched and always offer the first group, so "
+        "a personal-data function is pointed at the payment provisions",
+    ),
+    "D3": (
+        CAND,
+        '    reference = f"{provision.instrument.short_name} Art {provision.article}"',
+        '    reference = f"Art {provision.article}"',
+        "test_a_point_level_provision_reads_as_a_lawyer_would_write_it",
+        "drop the instrument from a citation, so Art 97 could be any of six "
+        "regulations",
+    ),
+    "D4": (
+        CAND,
+        '    if provision.point:',
+        '    if False:',
+        "test_a_point_level_provision_reads_as_a_lawyer_would_write_it",
+        "drop the point from a citation, so 97(1)(b) payment initiation is "
+        "indistinguishable from 97(1)(a) account access -- which attracts a "
+        "different duty under 97(2)",
+    ),
+    "D5": (
+        CAND,
+        '    "money": (',
+        '    "money_disabled": (',
+        "test_money_offers_the_payment_provisions",
+        "rename the money vocabulary so a payment function is offered no "
+        "provision at all, silently",
+    ),
+    "D7": (
+        CAND,
+        '    GDPR_ART_25.id: (',
+        '    "unused_key_25": (',
+        "test_mapped_or_excused_with_a_reason",
+        "drop a provision from the excused list, so a pinned duty is neither "
+        "offered nor accounted for and nobody can tell it was forgotten",
+    ),
     "L16": (
         LINT,
         '    if any(_matches_tokens(name, PII_TOKENS) for name in names):\n        found.append("pii")',
@@ -352,8 +414,8 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
     ),
     "L24": (
         LINT,
-        '            finding.indent + _render_decorator(finding) + term,',
-        '            " " * len(finding.indent) + _render_decorator(finding) + term,',
+        '            finding.indent + line + term for line in _render_annotation(finding)',
+        '            " " * len(finding.indent) + line + term for line in _render_annotation(finding)',
         "test_a_tab_indented_method_is_indented_with_a_tab",
         "re-emit indentation as spaces, destroying tabs",
     ),
@@ -387,7 +449,7 @@ BASELINE: dict[str, str] = {
     "A3b": "not_caught",
     "A4": "caught",
     "A5": "not_caught",
-    "D6": "caught",
+    "D7": "caught",
     # F-011 narrowed: citation structure is now validated against the span,
     # so fabricating Art. 5(9)(z) is caught. Hand-updated, which is the
     # intended friction -- a mutation becoming caught is a fix worth noticing.
@@ -433,6 +495,13 @@ BASELINE: dict[str, str] = {
     "L30": "caught",
     "C4": "caught",
     "A7": "caught",
+    "L31": "caught",
+    "D1": "caught",
+    "D2": "caught",
+    "D3": "caught",
+    "D4": "caught",
+    "D5": "caught",
+    "D6": "caught",
 }
 
 
@@ -497,6 +566,24 @@ def main(ids: list[str]) -> int:
     return 1 if missed else 0
 
 
+def _duplicate_keys() -> list[str]:
+    """Row ids written more than once in the literal below.
+
+    A dict literal with a repeated key keeps the last value and discards the
+    rest without a word, so a new row can be written, committed, and never run.
+    This was not hypothetical: row "D7" was first written as "D6", which
+    already existed, and it vanished. The baseline coverage check could not see
+    it either, because both keys were present -- only the row's absence from
+    the run gave it away, and only because somebody was reading the output.
+    """
+    source = Path(__file__).read_text()
+    written = re.findall(r'^    "([A-Za-z0-9_]+)": \(', source, re.M)
+    seen: dict[str, int] = {}
+    for key in written:
+        seen[key] = seen.get(key, 0) + 1
+    return sorted(k for k, n in seen.items() if n > 1)
+
+
 def check() -> int:
     """CI mode: every baselined mutation must match its expected status."""
     # Snapshot dirtiness up front: a tree that was already dirty is not evidence
@@ -511,6 +598,13 @@ def check() -> int:
     # Iterating BASELINE alone meant a mutation added to MUTATIONS without a
     # baseline entry was never executed, while the summary still reported
     # "N mutations match baseline". Pin both directions.
+    if duplicates := _duplicate_keys():
+        print("mutation ids written more than once; a dict literal discards all")
+        print("but the last, so these rows are not all running:")
+        for key in duplicates:
+            print(f"  - {key}")
+        return 1
+
     unbaselined = sorted(set(MUTATIONS) - set(BASELINE))
     unknown = sorted(set(BASELINE) - set(MUTATIONS))
     if unbaselined or unknown:

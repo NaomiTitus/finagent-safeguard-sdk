@@ -39,6 +39,7 @@ __all__ = [
     "NumericParameter",
     "Obligation",
     "Provenance",
+    "Provision",
     "OJ_DATE_RE",
     "ReferencePoint",
     "Registry",

@@ -356,18 +356,22 @@ class TestWhatIsWrittenIntoSource:
         """The old comment wrote a guessed category and appended "confirm the
         category", which got the emphasis backwards: the guess read as the
         answer and the confirmation as paperwork."""
-        from finagent_safeguard.cli.linter import _render_decorator
+        from finagent_safeguard.cli.linter import _render_annotation
 
         found = _findings(
             tmp_path,
             "from decimal import Decimal\n\n\ndef settle(amount: Decimal) -> None:\n    pass\n",
         )
-        line = _render_decorator(found[0])
-        assert "REVIEW_REQUIRED" in line
-        assert "money" in line
-        assert "Replace with the category you have confirmed" in line
-        for category in ("PSD2", "GDPR", "AML", "DORA"):
-            assert category not in line
+        block = "\n".join(_render_annotation(found[0]))
+        assert "FinancialCategory.REVIEW_REQUIRED" in block
+        assert "money identifiers" in block
+        assert "Replace REVIEW_REQUIRED with the category you have confirmed" in block
+        # Candidate provisions are offered, which is the opposite of asserting
+        # one: they appear under a heading that says to read them, and the
+        # decorator itself still names no regulation.
+        assert "candidates to read before deciding" in block
+        assert "PSD2 Art 97(1)(b)" in block
+        assert "@regulated_tool(FinancialCategory.PSD2" not in block
 
 
 class TestBankReachability:
