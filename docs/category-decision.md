@@ -25,7 +25,7 @@ Over 155 top-level stdlib modules: **51 functions flagged, 0 correct.** The stdl
 financial code, so precision on non-financial input is zero. `ipaddress` alone contributes 15,
 because `address` is a PII token.
 
-`pyiso20022` (MIT), a pure ISO 20022 payments library, trips **0 of its 66 functions**. This is
+`pyiso20022` (MIT), a pure ISO 20022 payments library, flags 6 of its 66 functions and **0 of the 13 named for ISO 20022 messages**. This is
 the systematic finding, not an anecdote: real payment vocabulary is message-type codes
 (`pain.001`, `pacs.008`, `camt.053`), not English nouns. A Nordic core-banking codebase is named
 this way, which is precisely the codebase this tool claims to serve.
@@ -361,8 +361,9 @@ inflates chance agreement and widens the interval past usefulness — demonstrat
 
 ### Step 1 — fix the detector (3–4 days). Necessary under every outcome
 
-It is broken in both directions: **51 flags / 0 correct** on stdlib, and **0 of 66** real
-ISO 20022 payment functions detected. Multi-label; delete the first-match tie-break; add
+It is broken in both directions: **51 flags / 0 correct** on stdlib, and in `pyiso20022`
+**none of the 13 ISO-20022-named functions** detected -- the 6 of its 66 that are flagged
+are flagged on a `Decimal` annotation, for reasons unrelated to payments. Multi-label; delete the first-match tie-break; add
 `NOT_REGULATED`; stop treating bare `Decimal` as evidence; negative lookarounds for `address`,
 `pan`, `transaction`, `cpr` as CodeQL and Privado already ship.
 

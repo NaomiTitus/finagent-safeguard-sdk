@@ -110,7 +110,7 @@ obligation is triggered. Reuses the `corpus/MANIFEST.json` pattern.
 |---|---|---|
 | `stripe-python` | MIT | real payment API surface |
 | `python-sepaxml` | MIT | SEPA credit transfers |
-| `pyiso20022` | MIT | **the blind spot** -- 0 of 66 functions trip the word lists |
+| `pyiso20022` | MIT | **the blind spot** -- 6 of its 66 functions are flagged and **none of the 13 named for ISO 20022 messages** |
 | `schwifty` | MIT | IBAN and BIC handling |
 | `django-oscar` | BSD-3 | commerce, money and personal data mixed |
 | `saleor` | BSD-3 | payment capture |
@@ -137,7 +137,7 @@ Recorded because they are the kind of thing that gets rebuilt by accident.
 | Day 3: build a refactorer | `plan_fix`/`apply_fix` exist with four write guards, validated over 16,800 generated files across three cold reviews. Rewriting discards that |
 | Candidates include `PSD2 Art 97(1)(a)` | Not declared -- but articles are pinned whole, so the text is already inside the pinned `art_97` span. Needs one `Provision` constant, no re-pin |
 | ICT vendor signal: `acme_risk`, `fraud_vendor` | Placeholder names, not signals. Needs a real rule, probably calls into any module outside the first-party package |
-| Classifier labels: AST rules, "zero LLM label noise" | The noise was never the problem. The AST oracle is unsound -- 51 flags / 0 correct on stdlib, 0 of 66 on real payment code -- so it is fine for training and useless for scoring |
+| Classifier labels: AST rules, "zero LLM label noise" | The noise was never the problem. The AST oracle is unsound -- 51 flags / 0 correct on stdlib, 0 of 13 ISO-20022-named functions -- so it is fine for training and useless for scoring |
 
 ## Known gaps, carried deliberately
 
@@ -154,3 +154,30 @@ Recorded because they are the kind of thing that gets rebuilt by accident.
 - One entailment claim remains dissented: GDPR Art 5(1)(c), where Haiku 5.5 reads the point as
   passive and naming no addressee while Opus and Sonnet take the structural reading via Art
   5(2). Both are defensible. It stays flagged rather than forced green.
+
+---
+
+## Correction: the pyiso20022 figure
+
+"0 of 66 functions trip the word lists" has been quoted in several commit
+messages and pull request descriptions in this repository. Re-measured
+first-hand against `phoughton/pyiso20022@cfb785fc`:
+
+| | |
+|---|---|
+| Functions, including tests and examples | 66 |
+| Flagged by the linter | **6** |
+| Functions named for an ISO 20022 message (`pain`, `pacs`, `camt`, `remt`) | 13 |
+| Of those, flagged | **0** |
+
+The substance survives and sharpens. The six that are flagged are
+`_validate_min_inclusive` and its siblings, caught on a `Decimal` annotation
+rather than on anything to do with payments -- so the tool finds the validator's
+helpers and misses every function that builds a credit transfer.
+
+Two notes on how the number went wrong, because both are the kind of mistake
+that repeats. The original "0 of 66" collapsed two different counts into one
+figure. And the first attempt to re-measure it excluded any path containing
+"test", which dropped 27 of the 66 functions including
+`create_pain001_001_008` -- the exact function the claim was about. The
+harvester keeps tests and examples for that reason.
