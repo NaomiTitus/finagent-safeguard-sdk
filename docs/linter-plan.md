@@ -141,8 +141,13 @@ Recorded because they are the kind of thing that gets rebuilt by accident.
 
 ## Known gaps, carried deliberately
 
-- `tools/check_entailment.py --check` and `tools/kappa.py` are **not in CI**. The entailment
-  verdicts are committed but nothing enforces them on a pull request.
+- ~~`tools/check_entailment.py --check` and `tools/kappa.py` are not in CI.~~ **Closed.** The
+  entailment audit now runs as a CI job against the `ACCEPTED` baseline in
+  `check_entailment.py`, failing on drift rather than demanding every claim be confirmed --
+  fourteen stand at `REVIEW_REQUIRED` because the judges agree on the answer and cite
+  different spans, and one is a genuine interpretive split. Mutation coverage of new code
+  (layer 1c) runs as a second job. `tools/kappa.py` has nothing to gate until the 150 labels
+  exist; its tests run with the rest.
 - `--check` detects a changed rubric or a re-pinned corpus, but **not a changed claim**.
   Editing an obligation leaves its verdict looking current. A claim digest in the run header
   would close it.

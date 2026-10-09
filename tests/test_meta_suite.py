@@ -272,3 +272,38 @@ class TestReviewPacketsAreSelfServe:
         assert any("docs" in rule for rule in prep.EXCLUSIONS), (
             "the exclusion must be stated in the manifest, not merely implied"
         )
+
+
+class TestTheGatesStayWired:
+    """A job removed from CI is a check that silently stops checking.
+
+    The entailment audit and the mutation-coverage check were both built, both
+    useful, and neither ran in CI for a day -- not because anyone decided
+    against them, but because wiring them was a separate step nobody had
+    written down. These assertions make deleting them a deliberate act.
+    """
+
+    @staticmethod
+    def _workflow() -> str:
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text()
+
+    def test_the_entailment_audit_runs(self) -> None:
+        body = self._workflow()
+        assert "tools/check_entailment.py --check" in body
+        # --check and nothing else: producing verdicts costs money and needs a
+        # key, and a CI job that spends per run is a job that gets disabled.
+        assert "tools/check_entailment.py --dry-run" not in body
+
+    def test_the_mutation_coverage_check_runs(self) -> None:
+        assert "tools/battery.py" in self._workflow()
+
+    def test_coverage_checkout_has_full_history(self) -> None:
+        """battery.py diffs against a base ref. A shallow checkout has no base,
+        and the check would pass by finding nothing to look at."""
+        body = self._workflow()
+        assert "fetch-depth: 0" in body
+
+    def test_the_mutation_baseline_runs(self) -> None:
+        assert "tools/run_mutations.py --check" in self._workflow()
