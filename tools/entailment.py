@@ -77,8 +77,12 @@ def render_claim(provision: Any) -> str:
 
     for obligation in REGISTRY.obligations():
         if obligation.provision is provision:
-            lines.append(f"Asserted addressee: {obligation.addressee}")
-            lines.append(f"Enforcing: {obligation.enforcing}")
+            named = ", ".join(a.value for a in obligation.addressee)
+            lines.append(f"Asserted addressee: {named}")
+            # ``enforcing`` says whether the duty is live today, which is a fact
+            # about our treatment and not about the provision's words. It is
+            # verified by TestApplicability. Submitting it asked the judge an
+            # unanswerable question, and the dissents duly cited it.
             # rationale is declared on RiskBasedObligation only, so read it
             # defensively rather than narrowing the type here.
             rationale = getattr(obligation, "rationale", "")

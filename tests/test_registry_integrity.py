@@ -179,7 +179,9 @@ class TestObligationShape:
 
     def test_every_obligation_declares_addressee(self) -> None:
         for obligation in REGISTRY.obligations():
-            assert isinstance(obligation.addressee, reg.Addressee), obligation.provision.id
+            assert obligation.addressee, obligation.provision.id
+            for addressee in obligation.addressee:
+                assert isinstance(addressee, reg.Addressee), obligation.provision.id
 
     def test_sdk_role_is_contributes_only(self) -> None:
         """The SDK is not the addressee of any obligation and never claims to be."""

@@ -67,11 +67,15 @@ class Addressee(StrEnum):
     #: enforcing duty on controllers, and six of six judgements found it to be
     #: a permission addressed to Member States. There was no way to say that.
     MEMBER_STATE = "member_state"
-    #: GDPR Art. 44 binds both roles in one sentence -- "complied with by the
-    #: controller and processor" -- and naming only the controller narrowed the
-    #: text. Kept as one member rather than a tuple field because the provision
-    #: imposes a joint condition, not two separable duties.
-    CONTROLLER_AND_PROCESSOR = "controller_and_processor"
+    PROCESSOR = "processor"
+    #: DORA Art. 23 names four types rather than using its own defined term
+    #: "financial entity". A single-valued addressee could not say that, so it
+    #: was recorded as the broader term and the entailment judges were right to
+    #: reject it. These are the text's own words.
+    CREDIT_INSTITUTION = "credit_institution"
+    PAYMENT_INSTITUTION = "payment_institution"
+    ACCOUNT_INFORMATION_SERVICE_PROVIDER = "account_information_service_provider"
+    ELECTRONIC_MONEY_INSTITUTION = "electronic_money_institution"
     DEPLOYER = "deployer"
     FINANCIAL_ENTITY = "financial_entity"
 
@@ -170,10 +174,25 @@ class Obligation:
     """A duty, addressed to a legal person the SDK is not."""
 
     provision: Provision
-    addressee: Addressee
+    #: Plural because provisions routinely bind more than one role: GDPR Art. 44
+    #: binds "the controller and processor", DORA Art. 23 names four entity
+    #: types. A single value forced either a narrowing of the text or a compound
+    #: enum member that would not compose, and the entailment run caught both.
+    addressee: tuple[Addressee, ...]
+    #: Whether the duty is live *today*. A property of our treatment, not of the
+    #: provision's words -- no reading of Art. 23 reveals whether DORA was in
+    #: force this morning -- so it is verified by TestApplicability and withheld
+    #: from the entailment judge.
     enforcing: bool
     sdk_role: SdkRole = SdkRole.CONTRIBUTES_ONLY
     interpretation_boundary: str = ""
+    #: Context that the cited provision cannot verify on its own -- a
+    #: cross-reference, a correction history, a reading carried from a
+    #: neighbouring paragraph. Withheld from the entailment judge, which is
+    #: told to decide against the supplied text and nothing else, so putting
+    #: unverifiable prose in a judged field produced dissent that was correct
+    #: and useless.
+    note: str = ""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -671,7 +690,7 @@ EXEMPTIONS: tuple[Exemption, ...] = (
 OBLIGATIONS: tuple[Obligation, ...] = (
     Obligation(
         provision=PSD2_ART_97_1_B,
-        addressee=Addressee.PAYMENT_SERVICE_PROVIDER,
+        addressee=(Addressee.PAYMENT_SERVICE_PROVIDER,),
         enforcing=True,
         interpretation_boundary=(
             "The SDK cannot know whether SCA occurred. It knows only whether the agent "
@@ -681,15 +700,31 @@ OBLIGATIONS: tuple[Obligation, ...] = (
     ),
     Obligation(
         provision=PSD2_ART_97_2,
-        addressee=Addressee.PAYMENT_SERVICE_PROVIDER,
+        addressee=(Addressee.PAYMENT_SERVICE_PROVIDER,),
         enforcing=True,
     ),
-    Obligation(provision=GDPR_ART_5_1_C, addressee=Addressee.CONTROLLER, enforcing=True),
-    Obligation(provision=GDPR_ART_25, addressee=Addressee.CONTROLLER, enforcing=True),
-    Obligation(provision=GDPR_ART_32, addressee=Addressee.CONTROLLER, enforcing=True),
+    Obligation(
+        provision=GDPR_ART_5_1_C,
+        addressee=(Addressee.CONTROLLER,),
+        enforcing=True,
+        note=(
+            "Art. 5(1)(c) is phrased as a state of the data, not as a duty on a "
+            "named person; Art. 5(2) is what makes the controller responsible for "
+            "Art. 5(1). The addressee here is therefore carried from Art. 5(2) and "
+            "is not stated in the cited point."
+        ),
+    ),
+    Obligation(
+        provision=GDPR_ART_25, addressee=(Addressee.CONTROLLER,), enforcing=True
+    ),
+    Obligation(
+        provision=GDPR_ART_32,
+        addressee=(Addressee.CONTROLLER, Addressee.PROCESSOR),
+        enforcing=True,
+    ),
     Obligation(
         provision=GDPR_ART_44,
-        addressee=Addressee.CONTROLLER_AND_PROCESSOR,
+        addressee=(Addressee.CONTROLLER, Addressee.PROCESSOR),
         enforcing=True,
         interpretation_boundary=(
             "Calling a model endpoint outside the EEA is a transfer. Whether it rests on "
@@ -702,7 +737,7 @@ OBLIGATIONS: tuple[Obligation, ...] = (
     ),
     Obligation(
         provision=GDPR_ART_87,
-        addressee=Addressee.MEMBER_STATE,
+        addressee=(Addressee.MEMBER_STATE,),
         enforcing=False,
         interpretation_boundary=(
             "Art. 87 is a permission, not a duty: Member States *may* further determine "
@@ -717,13 +752,22 @@ OBLIGATIONS: tuple[Obligation, ...] = (
             "the RTS Art. 16 derogation as an SCA trigger."
         ),
     ),
-    Obligation(provision=DORA_ART_28_3, addressee=Addressee.FINANCIAL_ENTITY, enforcing=True),
+    Obligation(
+        provision=DORA_ART_28_3,
+        addressee=(Addressee.FINANCIAL_ENTITY,),
+        enforcing=True,
+    ),
     Obligation(
         provision=DORA_ART_23,
-        addressee=Addressee.PAYMENT_SERVICE_PROVIDER,
+        addressee=(
+            Addressee.CREDIT_INSTITUTION,
+            Addressee.PAYMENT_INSTITUTION,
+            Addressee.ACCOUNT_INFORMATION_SERVICE_PROVIDER,
+            Addressee.ELECTRONIC_MONEY_INSTITUTION,
+        ),
         enforcing=True,
         interpretation_boundary=(
-            "Narrowed after the first entailment run. The text does not say \"financial "
+            "Narrowed twice. The text does not say \"financial "
             "entities\": it extends the Chapter's requirements to payment-related "
             "incidents \"where they concern credit institutions, payment institutions, "
             "account information service providers, and electronic money institutions\". "
@@ -735,7 +779,7 @@ OBLIGATIONS: tuple[Obligation, ...] = (
     ),
     RiskBasedObligation(
         provision=AMLR_ART_26_1,
-        addressee=Addressee.OBLIGED_ENTITY,
+        addressee=(Addressee.OBLIGED_ENTITY,),
         enforcing=False,
         rationale=(
             "Ongoing monitoring is risk-based. There is no amount at which structuring "
@@ -745,7 +789,7 @@ OBLIGATIONS: tuple[Obligation, ...] = (
     ),
     RiskBasedObligation(
         provision=AMLR_ART_69_1_A,
-        addressee=Addressee.OBLIGED_ENTITY,
+        addressee=(Addressee.OBLIGED_ENTITY,),
         enforcing=False,
         rationale=(
             "Reporting attaches to suspicion 'regardless of the amount involved'. Any "
@@ -755,7 +799,7 @@ OBLIGATIONS: tuple[Obligation, ...] = (
     ),
     Obligation(
         provision=TFR_ART_4_4,
-        addressee=Addressee.PAYMENT_SERVICE_PROVIDER,
+        addressee=(Addressee.PAYMENT_SERVICE_PROVIDER,),
         enforcing=True,
         interpretation_boundary=(
             "Corrected after the first entailment run, where two of three judges "
