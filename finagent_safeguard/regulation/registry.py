@@ -63,6 +63,19 @@ class Addressee(StrEnum):
     PAYMENT_SERVICE_PROVIDER = "payment_service_provider"
     OBLIGED_ENTITY = "obliged_entity"
     CONTROLLER = "controller"
+    #: Added after the first entailment run: GDPR Art. 87 was recorded as an
+    #: enforcing duty on controllers, and six of six judgements found it to be
+    #: a permission addressed to Member States. There was no way to say that.
+    MEMBER_STATE = "member_state"
+    PROCESSOR = "processor"
+    #: DORA Art. 23 names four types rather than using its own defined term
+    #: "financial entity". A single-valued addressee could not say that, so it
+    #: was recorded as the broader term and the entailment judges were right to
+    #: reject it. These are the text's own words.
+    CREDIT_INSTITUTION = "credit_institution"
+    PAYMENT_INSTITUTION = "payment_institution"
+    ACCOUNT_INFORMATION_SERVICE_PROVIDER = "account_information_service_provider"
+    ELECTRONIC_MONEY_INSTITUTION = "electronic_money_institution"
     DEPLOYER = "deployer"
     FINANCIAL_ENTITY = "financial_entity"
 
@@ -161,10 +174,25 @@ class Obligation:
     """A duty, addressed to a legal person the SDK is not."""
 
     provision: Provision
-    addressee: Addressee
+    #: Plural because provisions routinely bind more than one role: GDPR Art. 44
+    #: binds "the controller and processor", DORA Art. 23 names four entity
+    #: types. A single value forced either a narrowing of the text or a compound
+    #: enum member that would not compose, and the entailment run caught both.
+    addressee: tuple[Addressee, ...]
+    #: Whether the duty is live *today*. A property of our treatment, not of the
+    #: provision's words -- no reading of Art. 23 reveals whether DORA was in
+    #: force this morning -- so it is verified by TestApplicability and withheld
+    #: from the entailment judge.
     enforcing: bool
     sdk_role: SdkRole = SdkRole.CONTRIBUTES_ONLY
     interpretation_boundary: str = ""
+    #: Context that the cited provision cannot verify on its own -- a
+    #: cross-reference, a correction history, a reading carried from a
+    #: neighbouring paragraph. Withheld from the entailment judge, which is
+    #: told to decide against the supplied text and nothing else, so putting
+    #: unverifiable prose in a judged field produced dissent that was correct
+    #: and useless.
+    note: str = ""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -278,6 +306,9 @@ class ReferencePoint:
 
     parameter: NumericParameter
     governs: str
+    #: Context the cited provision cannot verify on its own. Withheld from the
+    #: entailment judge for the same reason as Obligation.note.
+    note: str = ""
     applies_from: _dt.date | None = None
     operative: Literal[False] = False
 
@@ -389,8 +420,8 @@ PSD2_ART_97_1_B = Provision(
     point="b",
     subdivision_id="art_97",
     obligation_text=(
-        "Member States shall ensure that a payment service provider applies strong "
-        "customer authentication where the payer"
+        "Member States shall ensure that a payment service provider applies strong customer authentication where the payer: ("
+        "a) accesses its payment account online; (b) initiates an electronic payment transaction"
     ),
 )
 
@@ -662,7 +693,7 @@ EXEMPTIONS: tuple[Exemption, ...] = (
 OBLIGATIONS: tuple[Obligation, ...] = (
     Obligation(
         provision=PSD2_ART_97_1_B,
-        addressee=Addressee.PAYMENT_SERVICE_PROVIDER,
+        addressee=(Addressee.PAYMENT_SERVICE_PROVIDER,),
         enforcing=True,
         interpretation_boundary=(
             "The SDK cannot know whether SCA occurred. It knows only whether the agent "
@@ -672,54 +703,123 @@ OBLIGATIONS: tuple[Obligation, ...] = (
     ),
     Obligation(
         provision=PSD2_ART_97_2,
-        addressee=Addressee.PAYMENT_SERVICE_PROVIDER,
+        addressee=(Addressee.PAYMENT_SERVICE_PROVIDER,),
         enforcing=True,
     ),
-    Obligation(provision=GDPR_ART_5_1_C, addressee=Addressee.CONTROLLER, enforcing=True),
-    Obligation(provision=GDPR_ART_25, addressee=Addressee.CONTROLLER, enforcing=True),
-    Obligation(provision=GDPR_ART_32, addressee=Addressee.CONTROLLER, enforcing=True),
+    Obligation(
+        provision=GDPR_ART_5_1_C,
+        addressee=(Addressee.CONTROLLER,),
+        enforcing=True,
+        note=(
+            "Art. 5(1)(c) is phrased as a state of the data, not as a duty on a "
+            "named person; Art. 5(2) is what makes the controller responsible for "
+            "Art. 5(1). The addressee here is therefore carried from Art. 5(2) and "
+            "is not stated in the cited point."
+        ),
+    ),
+    Obligation(
+        provision=GDPR_ART_25, addressee=(Addressee.CONTROLLER,), enforcing=True
+    ),
+    Obligation(
+        provision=GDPR_ART_32,
+        addressee=(Addressee.CONTROLLER, Addressee.PROCESSOR),
+        enforcing=True,
+    ),
     Obligation(
         provision=GDPR_ART_44,
-        addressee=Addressee.CONTROLLER,
+        addressee=(Addressee.CONTROLLER, Addressee.PROCESSOR),
         enforcing=True,
         interpretation_boundary=(
             "Calling a model endpoint outside the EEA is a transfer. Whether it rests on "
-            "an adequacy decision or on Art. 46 safeguards is the deployer's assessment."
+            "an adequacy decision or on Art. 46 safeguards is the deployer's assessment. "
+            "Addressee corrected after the first entailment run: the text requires the "
+            "Chapter V conditions to be \"complied with by the controller and processor\", "
+            "and naming the controller alone omitted the processor. An agent framework is "
+            "frequently the processor, so the omitted role was the likelier one here."
         ),
     ),
     Obligation(
         provision=GDPR_ART_87,
-        addressee=Addressee.CONTROLLER,
-        enforcing=True,
+        addressee=(Addressee.MEMBER_STATE,),
+        enforcing=False,
         interpretation_boundary=(
-            "A national identification number is not Art. 9 special-category data. The "
-            "restriction arises from national law made under Art. 87, and the tests differ "
-            "by country -- a single pan-Nordic rule would be wrong."
+            "Art. 87 is a permission, not a duty: Member States *may* further determine "
+            "the conditions for processing a national identification number. It binds "
+            "legislatures, not controllers, and the SDK cannot enforce it. Recorded here "
+            "because the national rules made under it are what actually constrain a "
+            "Nordic deployment, and the tests differ by country -- a single pan-Nordic "
+            "rule would be wrong. A national identification number is also not Art. 9 "
+            "special-category data. "
+            "Corrected after the first entailment run found the original entry had both "
+            "the addressee and the direction wrong: the same class of error as reading "
+            "the RTS Art. 16 derogation as an SCA trigger."
         ),
     ),
-    Obligation(provision=DORA_ART_28_3, addressee=Addressee.FINANCIAL_ENTITY, enforcing=True),
-    Obligation(provision=DORA_ART_23, addressee=Addressee.FINANCIAL_ENTITY, enforcing=True),
+    Obligation(
+        provision=DORA_ART_28_3,
+        addressee=(Addressee.FINANCIAL_ENTITY,),
+        enforcing=True,
+    ),
+    Obligation(
+        provision=DORA_ART_23,
+        addressee=(
+            Addressee.CREDIT_INSTITUTION,
+            Addressee.PAYMENT_INSTITUTION,
+            Addressee.ACCOUNT_INFORMATION_SERVICE_PROVIDER,
+            Addressee.ELECTRONIC_MONEY_INSTITUTION,
+        ),
+        enforcing=True,
+        interpretation_boundary=(
+            "Narrowed twice. The text does not say \"financial "
+            "entities\": it extends the Chapter's requirements to payment-related "
+            "incidents \"where they concern credit institutions, payment institutions, "
+            "account information service providers, and electronic money institutions\". "
+            "All four are payment service providers under PSD2 Art. 1(1), so that is the "
+            "closest available addressee and it is narrower than the text's own defined "
+            "term \"financial entity\", which would have over-applied this provision to "
+            "every DORA-regulated firm."
+        ),
+    ),
     RiskBasedObligation(
         provision=AMLR_ART_26_1,
-        addressee=Addressee.OBLIGED_ENTITY,
+        addressee=(Addressee.OBLIGED_ENTITY,),
         enforcing=False,
         rationale=(
-            "Ongoing monitoring is risk-based. There is no amount at which structuring "
-            "becomes reportable; structuring is reportable because it is structuring. "
+            "The provision states no monetary threshold for ongoing monitoring."
+        ),
+        note=(
+            "Structuring is reportable because it is structuring, not because it crosses "
+            "an amount -- but Art. 26(1) routes detected transactions to a more thorough "
+            "assessment under Art. 69(2) and does not itself address reporting, so that "
+            "follows from Art. 69 rather than from this paragraph. "
             "Not enforcing: AMLR applies from 10 July 2027."
         ),
     ),
     RiskBasedObligation(
         provision=AMLR_ART_69_1_A,
-        addressee=Addressee.OBLIGED_ENTITY,
+        addressee=(Addressee.OBLIGED_ENTITY,),
         enforcing=False,
         rationale=(
-            "Reporting attaches to suspicion 'regardless of the amount involved'. Any "
-            "monetary trigger here would be both legally unfounded and a structuring "
+            "Reporting attaches to suspicion regardless of the amount involved; the "
+            "provision states no monetary threshold."
+        ),
+        note=(
+            "Any monetary trigger here would be both legally unfounded and a structuring "
             "roadmap. Not enforcing: AMLR applies from 10 July 2027."
         ),
     ),
-    Obligation(provision=TFR_ART_4_4, addressee=Addressee.OBLIGED_ENTITY, enforcing=True),
+    Obligation(
+        provision=TFR_ART_4_4,
+        addressee=(Addressee.PAYMENT_SERVICE_PROVIDER,),
+        enforcing=True,
+        interpretation_boundary=(
+            "Corrected after the first entailment run, where two of three judges "
+            "dissented. The duty falls on \"the payment service provider of the payer\", "
+            "not on an obliged entity generally. A PSP is usually an obliged entity under "
+            "the AMLR, but the converse does not hold, so the generic term applied this "
+            "verification duty to firms the provision does not reach."
+        ),
+    ),
 )
 
 # --------------------------------------------------------------------------
@@ -747,9 +847,20 @@ REFERENCE_POINTS: tuple[ReferencePoint, ...] = (
             locus=AMLR_ART_19_4,
         ),
         governs=(
-            "FULL customer due diligence trigger for occasional transactions in cash. "
-            "Not a reduced or simplified regime -- simplified due diligence is Art. 33 "
-            "and is risk-based, not threshold-based."
+            "By way of derogation from Art. 19(1), point (b): an occasional transaction "
+            "in cash of at least EUR 3 000 requires at least the customer due diligence "
+            "measures referred to in Art. 20(1), point (a)."
+        ),
+        note=(
+            "Art. 20(1), point (a) is identification and verification of the customer; "
+            "its text is not pinned here, so that gloss cannot be verified from Art. 19 "
+            "alone. Simplified due diligence under Art. 33 is a separate, risk-based "
+            "regime and is not what this paragraph creates. "
+            "Corrected after the first entailment run, which found this recorded as a "
+            "FULL CDD trigger, 'not a reduced or simplified regime' -- inverting a "
+            "derogation into a wider duty than the text imposes. Same error class as "
+            "reading the RTS Art. 16 EUR 30 derogation as an SCA trigger, and it was "
+            "mine."
         ),
         applies_from=_dt.date(2027, 7, 10),
     ),
@@ -783,8 +894,13 @@ REFERENCE_POINTS: tuple[ReferencePoint, ...] = (
             "Art. 5(3) derogation from the Art. 4(4) duty to verify payer information "
             "applies. The figure is cited here at Art. 5(2)(b), where it actually "
             "appears; Art. 5(3) incorporates it by reference and contains no monetary "
-            "figure of its own. Governs VERIFICATION, not reporting -- it is commonly "
-            "misdescribed as a reporting threshold and is not one."
+            "figure of its own."
+        ),
+        note=(
+            "Governs verification, not reporting; it is commonly misdescribed as a "
+            "reporting threshold and is not one. Art. 5(2)(b) is itself framed as an "
+            "information-provision duty, so that characterisation rests on Art. 5(3) "
+            "and cannot be read off Art. 5(2)(b) alone."
         ),
     ),
 )

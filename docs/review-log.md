@@ -318,3 +318,115 @@ handled.
 **For next time.** Run `gh stack init` *before* cutting the first branch of a stack, not
 after. Installing a tool and then not using it is worse than not installing it, because the
 install reads as evidence the tool was used.
+
+---
+
+## 2026-10-06 — F-013: the mutation runner could report a wrong verdict
+
+**What happened.** After a clean `--check` reporting 15/15, the suite failed with
+`32023R1113:5.9.z cites paragraph 9` -- a mutation that was no longer anywhere on disk. The
+source was clean, HEAD was clean, and the loaded module still carried the mutated value.
+
+**Cause.** Stale bytecode. `paragraph="9"` is exactly as long as `paragraph="2"`, and the
+mutate and revert writes landed inside the same second. Python's import cache validates on
+`(mtime, size)`, so neither changed and the interpreter reused a `.pyc` compiled from the
+mutated source.
+
+**Why it matters more than the symptom.** Every mutation verdict taken before this fix is
+suspect in *both* directions: a mutation could read `caught` because stale bytecode still
+held the un-mutated code, or `not_caught` because the revert never reached the interpreter.
+The tool whose job is to verify that tests bite was itself unverified.
+
+**Fix.** `PYTHONDONTWRITEBYTECODE=1` in the subprocess environment, plus an explicit purge of
+the mutated package's `__pycache__` both before and after each run -- belt and braces,
+because a cache written by an earlier run or by the developer's own imports is still on disk
+and still stale. The full baseline was re-run from a cleared cache afterwards; 15/15 stands.
+
+**Shape.** Same as F-010 and F-012: a claim about state taken from a command run earlier
+rather than from the state itself. Here the state was one level below the filesystem.
+
+---
+
+## 2026-10-07 — F-014: the same self-inflicted loss, a third time
+
+**What happened.** Mid-way through building Phase 1, I ran
+`git checkout -- finagent_safeguard/cli/linter.py` to undo a one-off diagnostic mutation. The
+Phase 1 implementation was uncommitted. It was destroyed. Six tests went red, and for a moment
+I suspected a leaked mutation rather than my own command.
+
+**This is the third occurrence.** F-010 and F-012 are the same command, the same cause, the
+same loss. After F-010 I wrote down "commit before mutating". After F-012 I wrote it down
+again, as two numbered rules. Both times the lesson was recorded and neither time did it
+change the behaviour.
+
+**The conclusion worth drawing is about controls, not about care.** A written lesson is not a
+control. It has now failed twice in a row, which is enough evidence to stop writing it a third
+time and change the mechanism instead.
+
+**The rule, stated so it can be followed mechanically rather than remembered:**
+
+> Never run `git checkout -- <file>` on a file with uncommitted work in it.
+>
+> To undo an experimental edit, use `tools/run_mutations.py`, which holds the original in
+> memory and restores from that. For a one-off experiment the runner does not cover, copy the
+> file to a temp path first and restore from the copy. `git checkout` restores from the last
+> commit, which is precisely the wrong source when the work is not committed.
+
+**And the reason it keeps happening, named honestly.** `git checkout --` *feels* like an undo.
+It is not. It is "replace this file with the committed version", which is identical to undo
+only when there is nothing uncommitted — the one condition that is false every time I reach
+for it mid-task.
+
+### Related: two mutation rows recorded as `not_caught` on purpose
+
+`L19` (the byte-envelope guard) and `L21` (the function-set check) are defence in depth. Their
+cases are each caught by a stronger check first, so neither has a test that depends on it
+alone. Both are baselined `not_caught` rather than given a contrived test, on the principle
+that a row reading `caught` because of an unrelated assertion is worse than one that admits it
+is a backstop. CI reports both on every run, so neither can be quietly forgotten.
+
+---
+
+## 2026-10-07 — F-015: fourth cold review, four defects in the linter
+
+The fourth isolated review (diff + test output + the committed Day 3 criterion, nothing else)
+found four. Three were silent — the tool reported success while being wrong.
+
+| # | Defect | Why it was silent |
+|---|---|---|
+| 1 | `TYPE_CHECKING` imports counted as bound | `_missing_imports` walked the whole tree, so an import that exists only for type-checkers looked satisfied. `--fix` skipped it, wrote the decorator, and the file passed all four write guards — then raised `NameError` on import. |
+| 2 | Detection used `str.splitlines()` | It splits on `\x0b \x0c \x1c \x1d \x1e \x85    `, which the tokenizer ignores. The indent was read off the wrong line, so `--fix` refused the file and blamed the edit rather than the scan. |
+| 3 | `_reaches_bank` missed `ImportFrom.names` | `from finagent_safeguard import bank_client` and `from . import bank_client` were invisible to the structural backstop. |
+| 4 | `_only_insertions` was super-quadratic | Byte-level `SequenceMatcher` made 40 functions take 1.38s. A 50 KB module would have taken minutes, which is how a `--fix` flag gets abandoned. |
+
+**Fixes.** (1) `_missing_imports` now reads `ast.parse(source).body` only — module-level,
+runtime-bound. Deliberately conservative: a module-level `try/except ImportError` is missed,
+which produces a harmless duplicate import rather than a `NameError`. (2) Detection now uses
+`_split_source_lines`, the same tokenizer-faithful split the write path already used.
+(3) `alias.name` on `ImportFrom` is checked, and `node.module is None` (relative import) is
+handled. (4) Line-level `SequenceMatcher`: 1.38s → 0.026s, a 53× speedup.
+
+**One subtlety the line-level change introduced.** A BOM lives inside the first line. When
+imports are inserted above it, the first line changes, so the comparison reported `replace` of
+that line even though no byte was lost — the guard became over-strict on exactly the case it
+was built for. Resolved by stripping the marker from both sides and checking its presence
+separately, which is also the clearer statement of intent.
+
+### Leftovers cleared in the same pass
+
+| Item | Finding |
+|---|---|
+| `_function_names` | Unreferenced. Deleted. |
+| `_matches_tokens` multi-word branch | Matched by **substring**, so the token `national_id` fired on `international_ideas` — a GDPR category written onto unrelated code. Now matches a run of whole words. |
+| `_matches_tokens` joined branch | Compared a *sorted*-and-rejoined form (`id_national`) against tokens written in reading order (`national_id`). It could never match. Dead. |
+| `_is_runtime_discarded` | Took an `aliases` argument and ignored it, trusting the bare name `overload`. **Any** local decorator of that name silently exempted a money-handling function — an invisible false negative a developer could create by accident. Now resolved through `typing` / `typing_extensions` imports, with `@typing.overload` handled by attribute. |
+
+Mutation row `L15` was re-anchored to the new code and `L26` added for the token fix. Baseline
+is 34 rows. Suite is 223 tests.
+
+### The pattern across four reviews, named
+
+Every review has found at least one defect of the same shape: **the tool reporting success
+while being wrong**. Not crashes — crashes are cheap. The expensive class is a confident
+`classified` on a function that is not protected. Reviews 1, 3 and 4 each found one. That is
+the failure mode this project exists to prevent, which makes it the one to keep hunting.

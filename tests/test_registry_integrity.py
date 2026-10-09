@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as _dt
 import re
+from pathlib import Path
 from decimal import Decimal
 from typing import Any
 
@@ -178,7 +179,9 @@ class TestObligationShape:
 
     def test_every_obligation_declares_addressee(self) -> None:
         for obligation in REGISTRY.obligations():
-            assert isinstance(obligation.addressee, reg.Addressee), obligation.provision.id
+            assert obligation.addressee, obligation.provision.id
+            for addressee in obligation.addressee:
+                assert isinstance(addressee, reg.Addressee), obligation.provision.id
 
     def test_sdk_role_is_contributes_only(self) -> None:
         """The SDK is not the addressee of any obligation and never claims to be."""
@@ -418,3 +421,115 @@ class TestCitationStructure:
             )
             checked += 1
         assert checked == 5, f"point citations moved to {checked}"
+
+
+class TestCorpusReconciliation:
+    """The registry and the pinned corpus must account for each other exactly.
+
+    Added after a manual count produced four different totals -- 23, 21, 22 and
+    15 -- and I reported them as a discrepancy. They were four different
+    quantities, all consistent. The real lesson is that a hand count of this is
+    worthless: it measured with a naive ``celex:subdivision`` join, missing that
+    the registry cites base CELEX (``32015L2366``) while the corpus pins
+    consolidated expressions (``02015L2366-20250117``). ``Provision.corpus_key``
+    already resolved that correctly.
+
+    These tests state each quantity so it can never drift unnoticed, and so the
+    answer to "is the tagged data consistent?" is a command, not a recollection.
+    """
+
+    def _cited(self) -> dict[str, list[str]]:
+        """Every corpus key any claim depends on, and what depends on it."""
+        cited: dict[str, list[str]] = {}
+
+        def note(provision: Any, source: str) -> None:
+            if provision is not None:
+                cited.setdefault(provision.corpus_key, []).append(source)
+
+        groups = (
+            ("obligation", REGISTRY.obligations()),
+            ("exemption", REGISTRY.exemptions()),
+            ("reference_point", REGISTRY.reference_points()),
+            ("application_date", REGISTRY.application_dates()),
+        )
+        for kind, items in groups:
+            for item in items:
+                note(getattr(item, "provision", None), kind)
+                note(getattr(item, "locus", None), kind)
+                for limb in getattr(item, "limbs", ()) or ():
+                    note(getattr(limb, "locus", None), f"{kind}.limb")
+                parameter = getattr(item, "parameter", None)
+                if parameter is not None:
+                    note(getattr(parameter, "locus", None), f"{kind}.parameter")
+
+        for parameter in REGISTRY.numeric_parameters():
+            note(parameter.locus, "numeric_parameter")
+
+        return cited
+
+    def test_every_cited_provision_is_pinned(self, corpus: dict[str, Any]) -> None:
+        """A claim citing text we never pinned cannot be verified at all.
+
+        This is the direction that matters: an unpinned citation is a claim
+        resting on nothing, which is the shape of the original EUR 30 error.
+        """
+        missing = sorted(key for key in self._cited() if key not in corpus)
+        assert not missing, f"cited but not pinned: {missing}"
+
+    def test_every_pinned_provision_is_cited(self, corpus: dict[str, Any]) -> None:
+        """Dead weight in the corpus is a smaller problem, but it means the
+        manifest no longer describes what the registry actually relies on, and
+        the corpus digest then changes for reasons nobody can account for."""
+        cited = self._cited()
+        orphans = sorted(key for key in corpus if key not in cited)
+        assert not orphans, f"pinned but uncited: {orphans}"
+
+    def test_the_constant_to_span_collapse_is_accounted_for(self) -> None:
+        """23 Provision constants resolve to 21 pinned spans.
+
+        Not an inconsistency: articles are pinned whole, so two paragraph-level
+        constants can share one span. Both collisions are named here, so a third
+        one appearing is a deliberate decision rather than a silent drift.
+        """
+        source = Path(reg.__file__).read_text()
+        names = re.findall(r"^([A-Z][A-Z_0-9]*)\s*=\s*Provision\(", source, re.M)
+
+        shared: dict[str, list[str]] = {}
+        for name in names:
+            shared.setdefault(getattr(reg, name).corpus_key, []).append(name)
+        collisions = {k: sorted(v) for k, v in shared.items() if len(v) > 1}
+
+        assert collisions == {
+            "02015L2366-20250117:art_97": ["PSD2_ART_97_1_B", "PSD2_ART_97_2"],
+            "32024R1624:art_19": ["AMLR_ART_19_1_B", "AMLR_ART_19_4"],
+        }
+        assert len(names) == 23
+        assert len(shared) == 21
+
+    def test_quoting_is_a_subset_of_citing(self) -> None:
+        """Only 15 of 23 constants carry verbatim ``obligation_text``.
+
+        The remaining 8 cite a provision without quoting it. That is allowed --
+        a citation is not a quotation -- but the ratio is asserted so that text
+        silently disappearing from a constant fails here.
+        """
+        source = Path(reg.__file__).read_text()
+        names = re.findall(r"^([A-Z][A-Z_0-9]*)\s*=\s*Provision\(", source, re.M)
+        quoted = [n for n in names if getattr(reg, n).obligation_text]
+        assert len(quoted) == 15, sorted(quoted)
+
+    def test_the_claim_population_is_stated(self) -> None:
+        """What the entailment gate will have to judge, fixed in one place."""
+        counts = {
+            "obligations": len(list(REGISTRY.obligations())),
+            "exemptions": len(list(REGISTRY.exemptions())),
+            "reference_points": len(list(REGISTRY.reference_points())),
+            "application_dates": len(list(REGISTRY.application_dates())),
+        }
+        assert counts == {
+            "obligations": 12,
+            "exemptions": 4,
+            "reference_points": 4,
+            "application_dates": 2,
+        }
+        assert sum(counts.values()) == 22

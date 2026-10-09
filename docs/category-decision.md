@@ -1,0 +1,537 @@
+# How the category gets decided
+
+**Status:** method agreed, not yet built. Supersedes nothing; `_category_for` in
+`finagent_safeguard/cli/linter.py` is the thing being replaced.
+
+Three isolated agents were asked how to assign the regulatory category: one arguing
+deterministic static analysis, one arguing a learned model, one designing the evaluation.
+None of them saw the others' work. Their full briefs are kept out of the repo; what follows
+is the decision and the evidence that forced it.
+
+## 1. The measurement that settled it
+
+Each agent, independently, ran the real linter rather than theorising. So did I. The results
+agree, and they are worse than "imprecise" — the classifier is **inverted**.
+
+| Function | Linter says | Truth |
+|---|---|---|
+| `transfer_focus(widget, target)` — GUI focus | `PSD2_PAYMENT_EXECUTION` | not financial |
+| `compute_mean(amount_a, amount_b)` — statistics | `PSD2_PAYMENT_EXECUTION` | not financial |
+| `create_pain001_001_008(msg_id, ccy, nb_txs)` — ISO 20022 | **not flagged** | PSD2 payment |
+| `gen_pacs008(dbtr, cdtr, instd_amt)` — SEPA credit transfer | **not flagged** | PSD2 payment |
+| `capture(payment, amount: Decimal, customer_id)` — Saleor | `GDPR_PII_PROCESSING` | PSD2 payment |
+
+Over 155 top-level stdlib modules: **51 functions flagged, 0 correct.** The stdlib contains no
+financial code, so precision on non-financial input is zero. `ipaddress` alone contributes 15,
+because `address` is a PII token.
+
+`pyiso20022` (MIT), a pure ISO 20022 payments library, trips **0 of its 66 functions**. This is
+the systematic finding, not an anecdote: real payment vocabulary is message-type codes
+(`pain.001`, `pacs.008`, `camt.053`), not English nouns. A Nordic core-banking codebase is named
+this way, which is precisely the codebase this tool claims to serve.
+
+## 2. Root causes, each verified in the source
+
+| Cause | Evidence |
+|---|---|
+| `_category_for` is three lines and hard-codes two outcomes | **4 of 6 `FinancialCategory` members are unreachable** from the linter: `PSD2_ACCOUNT_ACCESS`, `GDPR_THIRD_COUNTRY_TRANSFER`, `AML_TRANSACTION_MONITORING`, `DORA_ICT_THIRD_PARTY` |
+| PII is tested first and returns on first match | A function with both money and person evidence is always GDPR. This fires on the *most* regulated functions, which are the ones carrying both |
+| `category: str` holds one value | `amount` + `email` is genuinely **both** categories. The data model cannot say so, so the tie-break is forced to invent a winner |
+| Bare `Decimal` counts as evidence | `statistics._decimal_sqrt_of_frac` and `pytest.approx` are flagged as regulated |
+| Tokens are matched without exclusions | `address` → all of `ipaddress`; `pan` → `matplotlib.start_pan`; `transaction` → `alembic.begin_transaction`; `cpr` → `prompt_toolkit.ask_for_cpr` (ANSI Cursor Position Request vs. Danish CPR-nummer) |
+
+## 3. What the prior art says
+
+The decisive discovery is that **this is a solved problem, and nobody solves it with a model at
+scan time.**
+
+| Tool | Mechanism, read from its source | Licence |
+|---|---|---|
+| CodeQL | `SensitiveDataClassification` is a five-word list plus identifier regexes; data flow only *propagates* a name-derived label | — |
+| Bearer | "pattern matching and heuristics" — 122 data types, 194 regex rules. ML is used **offline to author rules**, never at scan time | ELv2 |
+| Privado | 107 regex data elements with a `tags/law` column mapping to legislation | GPL-3.0 — **cannot vendor** |
+| Presidio | pattern + checksum + context; ML only for `PERSON`/`LOCATION` | — |
+
+All three code scanners carry hand-written negative lookarounds for **our exact bug**:
+Privado has `(?<!question)bank`, `dna(?!me)`, `(?<!(sh|tr))ip`; CodeQL excludes
+`concert|wildcard|accountable`. CodeQL also contains a commented-out `email` rule annotated
+`// this seems too noisy`. They tried the thing we are doing, measured it, and removed it.
+
+Two citations that change how this project should present itself:
+
+- **Hjerppe, Ruohonen & Leppänen (2020)**, DOI `10.1007/978-3-030-42504-3_22`, University of
+  Turku — annotation-driven GDPR compliance tooling. This is substantially this project's
+  design, in Java, six years earlier. Cite it; do not claim novelty.
+- **Tang, Østvold & Bruntink (2023)**, DOI `10.3233/FAIA230228`, Norsk Regnesentral — the only
+  verified precision figure in the literature for this task: **0.87 across four applications**,
+  recall not reported. Say "four applications", not "n=4": the weakness is four subject
+  programs, which is a different and more serious criticism than four data points.
+- **PrivDev** (arXiv `2610.03518`) maps Bearer's 122 types to GDPR via DPV: 43 derived
+  mechanically, **79 needed an LLM** — used offline, SHACL-validated, frozen. Nine annotators
+  reached **0.72 raw agreement**, and the authors also report **Gwet's AC1 = 0.68**. The raw
+  figure is *not* a kappa and must never be quoted as one: raw agreement is always the higher
+  number because it includes agreement reached by chance. AC1 is the comparable statistic.
+
+That last number is the warning. If trained annotators reach 0.72 on data-type→regulation
+mapping, no classifier can be judged against a ground truth we have not measured agreement on.
+
+## 4. The determinism finding
+
+The model-side agent conceded this rather than defending it, which is why it carries weight.
+
+> Temperature 0 is **not** determinism. 1,000 temperature-0 completions produced **80 unique
+> outputs**. The cause is non-batch-invariant GPU kernels plus varying server batch size — it
+> is a property of the serving stack and cannot be fixed from the client.
+
+So "temperature 0 for reproducibility" must never appear in this project's documentation. An
+LLM can still be used, but only where its output is **frozen into a reviewed artefact** before
+CI reads it — the same cassette pattern `PLAN.md` §5.4 already uses for the entailment gate.
+Cost at scan time is then **$0.00**, and the thing an auditor inspects is a table, not a model.
+
+## 5. Agreed method
+
+Four steps, in this order. Each gate must pass before the next begins.
+
+### Step 0 — agreement pilot (half a day, no code)
+
+Label 40 functions twice, independently, against the 6-way taxonomy. Compute Cohen's kappa.
+
+- **κ < 0.40 → stop.** The taxonomy is broken, not the classifier. No amount of engineering
+  fixes a label two competent readers cannot agree on, and building a classifier against it
+  would produce a number that means nothing.
+- **κ ≥ 0.40 → continue,** and publish κ as the ceiling beside every accuracy figure.
+
+This is first because it is the only step that can invalidate all the others.
+
+### Step 1 — fix the defects (2–3 days)
+
+These need no method decision; they are bugs, and they are most of the measured error.
+
+1. Make the category **multi-label** — `amount` + `email` emits both.
+2. Delete the first-match tie-break entirely.
+3. Add `NOT_REGULATED` so "scanned and cleared" is distinguishable from "never looked at".
+4. Stop treating a bare `Decimal` annotation as evidence.
+5. Reach all six categories, or delete the four that are unreachable from the enum.
+
+### Step 2 — the benchmark (3–4 days)
+
+Labels frozen and committed **before** Step 3 begins, so the classifier author cannot tune
+against them.
+
+- **~350 items** minimum (McNemar power to distinguish two methods), 600 comfortable.
+- **~40 minimal pairs** — near-identical functions with different correct labels. This is the
+  technique that catches a classifier keying on surface tokens, and it is what exposed the
+  inversion in §1.
+- **Pointer-only corpus**: URL + commit SHA + line range + SHA-256, never vendored source.
+  This triggers no licence obligation and reuses the existing `corpus/MANIFEST.json` pattern.
+- Harvested from verified-permissive Python: `stripe-python` (MIT), `django-oscar` (BSD-3),
+  `mollie` (BSD-2), `schwifty` (MIT), `python-sepaxml` (MIT), `saleor` (BSD-3),
+  `pyiso20022` (MIT). **Excluded:** `plaid-python` — MIT but 41% structurally duplicate
+  functions, one body repeated 2,251 times. `Open Bank Project` is AGPL-3.0 Scala.
+  There is **no open-source Python core-banking system** to harvest; Fineract is Java, Mifos is
+  TypeScript/Kotlin, Cyclos has no public repo.
+- `pyiso20022` goes in the **test** split specifically, because it is the blind spot.
+
+The only existing code-level compliance benchmark, **GDPR-Bench-Android** (arXiv `2511.00619`,
+MIT), was audited and has defects we must not reproduce: **0 negative instances** (the schema has
+seven fields and no polarity field at all, so false positives are unmeasurable); **857
+distinct snippets across 1,951 rows**, i.e. 1,094 repeats; **1,044 of 1,951 rows (53.5%) come
+from a single app**; the corpus is **entirely RAT/spyware**, which is not the population any
+normal codebase is drawn from; **74% of rows cover four articles** while five articles have
+exactly one row each; and **no agreement statistic anywhere** — its own README links
+annotation guidelines that do not exist in the repository. Publishing ours with those five fixed is a better
+contribution than any score.
+
+**Headline metric: governance regret per 1,000 functions**, under a published cost matrix —
+miss 10, wrong category 25, abstain 2, false alarm 1. It is the only candidate that prices the
+asymmetry (a false compliance claim in someone's source is worse than a missed function) and
+cannot be gamed by always abstaining *or* always guessing. Never publish it without the human
+agreement ceiling from Step 0 beside it.
+
+### Step 3 — evidence sets and structural abstention (8–12 days, ~600–1000 LOC, no dependencies)
+
+A category is **asserted** only when there is either one unambiguous item (a domain type, a
+known call target) **or** two independent corroborating loci. Two or more asserted → emit all.
+One weak locus → `REVIEW_REQUIRED`, naming the candidates. Reachability alone →
+`REVIEW_REQUIRED` with no candidate.
+
+No tuned threshold appears anywhere, which matters: the provenance rule would reject a `0.7`
+that cannot be traced to a provision. Highest value per line is literal-subscript evidence
+(`req["iban"]`) at 40–80 LOC.
+
+**`REVIEW_REQUIRED` must not be a `FinancialCategory` member.** As an enum member it becomes a
+value a developer can write by hand, which makes it a silent exemption — the exact bug class
+`linter.py` has already fought three times (`@overload`, docstring-suppressed imports,
+`TYPE_CHECKING`). It is a separate state meaning *the tool refused*, and it fails CI.
+
+### Step 4 — LLM at authoring time only, if Step 3's abstention rate is too high to use
+
+Adjudicates the abstain band, offline, writing a `labels.jsonl` that a human reviews and
+commits. CI reads the committed file and never calls a model. **$0.00 per CI run**;
+$0.03–0.09 per adjudicated function.
+
+## 6. The strongest argument against all of this
+
+It comes from this project's own source. `taxonomy/policies.py` states that a category
+"deliberately carries no threshold, citation or amount", and that the decorator answers only
+*"has this been classified?"*
+
+If that scoping is sincere, **category correctness is already disclaimed** — and the honest
+move is to narrow the product rather than engineer a classifier for a claim we are not making:
+emit `REVIEW_REQUIRED` plus candidate provisions, always, and let the developer pick. That
+dissolves Steps 2 and 3 and most of the risk.
+
+The counter-argument is that a tool which never names a category gives a developer nothing to
+act on, and that candidate provisions are themselves a claim requiring the same evidence. This
+is unresolved and is the first thing to settle after Step 0, because it determines whether
+Steps 2–3 are worth building at all.
+
+## 7. Residual holes, disclosed not solved
+
+- The annotation guideline would be written by the classifier's author. Mitigation: freeze it
+  before Step 3 and publish it; it is already the strongest available guard, and it is weak.
+- Synthetic items for rare classes are easier than real ones, so rare-class scores are
+  optimistic.
+- The corpus is e-commerce and payment-client Python. The deployment target is Nordic core
+  banking. These are not the same population, and no permissive sample of the latter exists.
+
+## 8. Two corrections to existing documents
+
+- `PLAN.md` §5.4.1 quotes `claude-opus-5` at $4/$20 per Mtok; the pricing page read during this
+  work gave $5/$25. **Unverified by me** — check before relying on either.
+- `PLAN.md` §13 should cite Hjerppe et al. (2020) as prior art rather than implying novelty.
+
+## 9. Novelty audit — one claim retracted before publication
+
+A third isolated agent was asked to disprove four claims before any of them reached a README.
+It disproved one and wounded two. Recorded here because a claim a reviewer can demolish in one
+search is worse than no claim.
+
+| Claim | Verdict | What settles it |
+|---|---|---|
+| Automated insertion of a compliance annotation with provable write safety is new | **RETRACTED** | The Checker Framework ships `insert-annotations-to-source` (repository created 2015) and a manual section titled "Whole-program inference that inserts annotations into source code". LibCST's own README describes a "lossless CST". Our write guards are good engineering, not a contribution |
+| Nobody binds a code annotation to regulatory text | **NARROWED** | W3C DPV 2.3 already carries ELI deep-links to article–paragraph–point level. Verified first-hand: 49 distinct refs in `eu-gdpr.ttl`, e.g. `eli/reg/2016/679/art_6/par_1/pnt_a/oj`. **But** each is a `schema:WebPage` holding a name and a URL — DPV stores **no verbatim text**. "Pinned verbatim span plus corpus digest" survives; "citing the regulation at all" does not |
+| No benchmark exists for regulatory classification of Python financial code | **STANDS, as worded** | Must cite LogiSafetyBench (arXiv `2601.08196`) and the Privacy-as-Code review (arXiv `2412.16667`) or it reads as a missed search |
+| Propose-then-confirm is a new synthesis | **NARROWED** | Every component exists: MonkeyType and pytype propose, the Checker Framework's `-AinferOutputOriginal` lets you diff before accepting, and whole-program inference *is* call-graph propagation. Claim the attributed, citation-carrying **record**, not the mechanism |
+
+### The finding that matters most
+
+**The Turku line was completed by the same three authors in 2022.** Hjerppe, Ruohonen &
+Leppänen, *Extracting LPL privacy policy purposes from annotated web service source code*,
+Software and Systems Modeling **22(1):331–349**, DOI `10.1007/s10270-022-00998-y`, CC-BY 4.0.
+Verified independently via Crossref. They take annotated source code and generate Layered
+Privacy Language policy data with a working static analysis tool.
+
+So framing this project as "the next step after Turku 2020" is disproved by the citation list
+of the very paper we cite. Both papers get cited, and the 2022 one is acknowledged as having
+already taken the annotation→policy step.
+
+**Undetermined:** whether the generated LPL policies carry article-level legal citations.
+Springer serves an HTML interstitial to automated clients despite the CC-BY licence, so the
+full text was not obtainable in this session. This is no longer decisive for the narrowed
+claim, because LPL concerns GDPR privacy policies and the open ground below is EU financial
+law — but it should be read before publication.
+
+### The one claim worth staking the README on
+
+Verified first-hand: DPV 2.3's `legal/eu/` contains **aiact, dga, ehds, gdpr, nis2**. There is
+**no PSD2, no AMLR, no DORA**. No search surfaced any code-level or vocabulary-level treatment
+of EU financial law.
+
+That gap is narrow, real, checkable, and ours. It is a much smaller claim than the four above,
+and it is the only one that survives a hostile reading.
+
+---
+
+# Revision after the second debate: the tool must not assert a category
+
+Three further isolated agents reviewed the design above — one defending it, one attacking it,
+one auditing novelty. **The proposal did not survive.** What follows supersedes §5 Step 3 and
+§6.
+
+## 1. What two independent agents found separately
+
+Both the defending and the attacking agent, without seeing each other's work, located the same
+number and reported it as decisive.
+
+**PrivDev** (arXiv `2610.03518`), nine annotators, 711 judgments on which GDPR provision
+applies to a static-analyser finding:
+
+| Statistic | Value |
+|---|---|
+| Raw agreement | 0.72 |
+| Gwet's AC1 | 0.682 |
+| **Krippendorff's α** | **0.251** |
+| α on the Article 9 subset | **0.056** |
+
+The task those annotators performed was *easier* than ours: verifying a proposed mapping, not
+assigning one of six categories from a function signature. PrivDev's authors describe their own
+article IRIs as "**review cues, not legal determinations of applicability**" — which is the
+opposing side's own wording for *propose, do not assert*.
+
+**GDPR-Bench-Android** benchmarks precisely what §5 Step 3 proposed to build — assigning
+regulatory article labels to code. Across 1,951 instances, 23 articles and 11 methods including
+eight frontier LLMs:
+
+| | |
+|---|---|
+| Best of eleven, multi-label article classification | **5.75% macro-F1** |
+| Deterministic AST — the only paradigm our stdlib constraint permits | **1.86%, worst of the eleven** |
+
+For **one** regulation. This project proposed four.
+
+## 2. The project's own source already decided this
+
+`taxonomy/policies.py`, verbatim:
+
+> A category answers one question — *has this function been classified?* — and **deliberately
+> carries no threshold, citation or amount**. Legal content lives in
+> `finagent_safeguard.regulation.registry`, where every number has provenance and every
+> quotation is machine-checked against pinned text.
+>
+> Keeping that boundary is what stops the project **reproducing its own original error in a
+> tidier wrapper**: an enum member asserting "SCA above EUR 30" would be just as unverified as
+> the YAML key it replaced.
+
+The proposal in §6 — bind each asserted category to a pinned verbatim provision — is the thing
+this docstring was written to forbid, and it names the reason: the invented €30 SCA threshold
+that founded this project. Verified by reading the file: `policies.py` and `registry.py` are
+**completely disconnected**, and the only link between them is that prose sentence. The
+separation is deliberate, documented, and correct.
+
+## 3. Verified in this repository
+
+| Claim | Status |
+|---|---|
+| `registry.py` is 889 lines with **zero** `FinancialCategory` references | **Confirmed** |
+| Three of the four unreachable members appear **exactly once** — their own enum line | **Confirmed** |
+| Nothing anywhere branches on *which* category it is | **Confirmed.** The only two occurrences are an error-message template and emitted source text. `_require_classification` unions the set and tests `registration is None` |
+| Replacing all six categories with one `CLASSIFIED` breaks no test, gate or report field | **Confirmed** |
+| The 23 pinned provisions are duties, with **no scope or definitions provision** among them | **Confirmed.** No PSD2 Art 3 (exclusions), no Art 4 (what a payment service *is*) — exactly what deciding a category would require |
+
+The last row is the quiet one. To assert that a function falls under PSD2 you need the scope
+and definition provisions. We pinned what an obliged entity must *do* and never what brings it
+*into scope*.
+
+## 4. Why `--fix` does not rescue the labelling burden
+
+This was the strongest argument for propose/assert, and the evidence is against it.
+
+| Evidence | Finding |
+|---|---|
+| Rak-amnouykit et al., DLS 2020 | **2,678 of 70,826** GitHub Python repos carry any PEP 484 annotation (3.8%); only 15% of those type-check clean |
+| Dropbox's ~4M annotated lines | The mechanism was a **CI ratchet** ("we gradually increased strictness requirements for new code") plus prioritising by fan-in — enforcement, not precision |
+| **PyAnnotate**, the mypy team's own auto-inserting tool | "Didn't see much adoption"; "in the end, most of the code was manually annotated by code owners" |
+| Checker Framework whole-program inference, ASE 2023 | A *sound* inference engine recovered only **39%** of human annotations; one project got 38% worse |
+| FSE 2025 suppression study | 7,357 suppressions across 46 Python projects, continuously increasing, **50.8% suppress no warning at all** |
+| Google Tricorder | Build-breaking analyses need "essentially zero" false-positive rate; ≥10% not-useful puts an analysis on probation, ≥25% switches it off. Developers experience "supply me an annotation" **as** a false positive — which is what `REVIEW_REQUIRED` is |
+
+The automated writer is the part of our tool that already works, and it is not the part that
+decides adoption.
+
+## 5. And the proposal's real danger, conceded by its own defender
+
+> Today `transfer_focus → PSD2_PAYMENT` is obviously a wordlist's output. Under this design a
+> human writes it, with a CELEX pin and Article 97 quoted beside it, and an auditor will trust
+> it more and be wrong to.
+
+Supported by the automation-bias literature (Parasuraman & Riley 1997; Skitka 1999; Goddard
+2012) and by Perry et al. (arXiv `2211.03622`), who found developers with an AI assistant wrote
+**less** secure code and were **more** confident it was secure. A citation does not make a
+label correct; it makes a wrong label harder to question.
+
+## 6. Agreed plan, revised
+
+**The tool proposes. It never asserts a category. Categories are not bound to citations.**
+
+### Step 0 — dual-scheme agreement pilot (2 days) — unchanged in position, widened in scope
+
+Label one sample twice: binary (regulated / not) and 6-way. Report Krippendorff's α and Gwet's
+AC1 for both, with intervals. Three outcomes, all actionable:
+
+| Result | Consequence |
+|---|---|
+| binary high, 6-way low | Collapse the taxonomy. Ship the negative result — it is a stronger portfolio artefact than a 5.75% classifier |
+| both low | The detector is the whole product |
+| 6-way holds | Only then is category work justified |
+
+It costs 2 days and gates 19–30. Sample must be balanced across categories, because skew
+inflates chance agreement and widens the interval past usefulness — demonstrated by
+`tools/kappa.py`, where 92.5% raw agreement yielded κ = 0.372 with an interval of −0.31 to 1.06.
+
+### Step 1 — fix the detector (3–4 days). Necessary under every outcome
+
+It is broken in both directions: **51 flags / 0 correct** on stdlib, and **0 of 66** real
+ISO 20022 payment functions detected. Multi-label; delete the first-match tie-break; add
+`NOT_REGULATED`; stop treating bare `Decimal` as evidence; negative lookarounds for `address`,
+`pan`, `transaction`, `cpr` as CodeQL and Privado already ship.
+
+### Step 2 — `--fix` writes `REVIEW_REQUIRED`, never a guessed category (1–2 days)
+
+Not a `FinancialCategory` member — a separate state meaning *the tool refused*, which fails CI.
+As an enum member it becomes a value a developer can hand-write, i.e. a silent exemption: the
+bug class this linter has already fought three times.
+
+### Step 3 — rank the worklist by fan-in (3–5 days)
+
+The 80/20 of call-graph propagation, and the mechanism Dropbox actually credits. Full
+cross-module propagation (10–20 days, high variance) is **deferred**, and its absence stated
+plainly rather than implied.
+
+### Step 4 — CI ratchet on diff-touched functions (2–3 days)
+
+Enforcement is the variable that moved adoption from 3.8% to 4M lines. A whole-repo gate on a
+brownfield codebase is a gate that gets switched off.
+
+### Step 5 — evaluate the heuristic as a *ranker*, not a classifier (3–4 days)
+
+precision@k over ~200 hand-labelled functions. This is the honest modelling contribution:
+training a classifier on labels with α = 0.251 measures the annotator. Measuring how far a
+name-based heuristic gets you as a *worklist* is a real, publishable result, and it is the
+question the project can actually answer.
+
+**Total 14–20 days**, against 26–30 for the rejected proposal, with the deleted work being the
+part the evidence says would not have worked.
+
+## 7. Novelty, final position
+
+| Claim | Status |
+|---|---|
+| Verbatim regulatory text bound to code annotations | **Dropped.** NIST OSCAL already ships SP 800-53 as verbatim normative prose with stable per-subitem ids |
+| Citing regulation from a scanner finding | **Dropped.** Privado has a `law` tag; DPV has article IRIs plus curated paraphrase; PrivDev maps findings to provisions |
+| Pinned verbatim spans of **PSD2 / AMLR / DORA** | **Stands.** Verified first-hand: DPV 2.3 `legal/eu/` contains aiact, dga, ehds, gdpr, nis2 — and none of the three financial instruments. No code-level or vocabulary-level treatment of EU financial law was found |
+| Automated insertion with write guards | **Retracted** in §9 above |
+
+The surviving claim is narrow: a machine-checked corpus of pinned EU **financial** provisions,
+and an honest measurement of how far static signals get you toward using it. That is smaller
+than what was proposed, and it is true.
+
+## 8. Still unverified, and recorded as such
+
+- The 16,800-file fuzz result for the write path is from an earlier session and was **not
+  re-run** during this review. It should be re-run before being quoted publicly.
+- Whether the Turku authors' 2022 SoSyM paper generates LPL policies carrying article-level
+  citations. Springer serves an HTML interstitial to automated clients despite the CC-BY
+  licence.
+- Johnson 2013, Bessey 2010 and Sadowski CACM 2018 are Crossref-verified to exist, but ACM is
+  unreachable from this environment, so no numbers are quoted from them.
+
+---
+
+# The successful prior art is type inference, not compliance
+
+A final literature pass, prompted by the owner's question: can a simple classifier *suggest*
+which decorator to add, with a human reviewing? The answer is yes, and there is a mature,
+deployed, measured literature for exactly that shape. It is just not in compliance.
+
+## 1. The four papers that matter
+
+| Work | What it does | Measured result |
+|---|---|---|
+| **Typilus** — Allamanis, Barr, Ducousso & Gao, 2020, arXiv `2004.10657` | Graph neural net predicts Python type annotations; **abstains** when unconfident; paired with an optional type checker | Confidently predicts for **70%** of annotatable symbols; when it predicts, the type **type-checks 95%** of the time. Also found *existing wrong* annotations — PRs accepted by `fairseq` and `allennlp` |
+| **TypeWriter** — Pradel, Gousios, Liu & Chandra, 2019, arXiv `1912.03768` (Facebook) | Prediction plus **search-based validation**: runs a gradual type checker over combinations of predicted types, feedback-directed | F1 **0.64** top-1, **0.79** top-5 for return types. Fully annotates **14–44%** of files *while ensuring type correctness*. Deployed at Facebook; thousands of types accepted |
+| **Type4Py** — Mir, Latoskinas, Proksch & Gousios, 2021, arXiv `2101.04470` | Deep similarity learning, nearest-neighbour over a type space | **MRR 77.1%**. Critically: trained and evaluated on a **type-checked** dataset, explicitly because human-provided annotations "might not always be sound" |
+| **ManyTypes4Py** — arXiv `2104.04706` | The benchmark the above are measured on | — |
+
+This is the architecture the owner described, built four times, deployed in industry, and
+reported with real numbers. It is a far better template than anything in the
+compliance-classification literature, where the best figure found was 5.75% macro-F1.
+
+## 2. Why it works there and not here — the one difference that matters
+
+**Typilus has a verifier.** "Did this annotation type-check?" is answerable by machine,
+cheaply, every time. That single fact supplies three things at once:
+
+1. **Sound training labels** without human annotators — Type4Py's deliberate choice.
+2. **A calibratable abstention threshold** — 95% precision at 70% coverage is measurable
+   because the oracle is mechanical.
+3. **Validation before the suggestion reaches a human** — TypeWriter's search-based loop.
+
+**Our problem has no verifier.** "Is this function `PSD2_PAYMENT_EXECUTION`?" cannot be
+checked by machine, which is precisely why nine trained annotators reached Krippendorff's
+α = 0.251. There is no type checker for regulatory scope.
+
+This reframes the whole difficulty. The gap is not that our model would be too weak. It is
+that **we have no oracle**, and every one of Typilus's three advantages derives from having one.
+
+## 3. The consequence: predict something checkable, derive the rest
+
+The path to a working classifier is to stop predicting the legal category and predict a
+property that *can* be verified, then derive the category from a reviewed table.
+
+| Target | Oracle | Label soundness |
+|---|---|---|
+| "Is this `PSD2_PAYMENT_EXECUTION`?" | none | α = 0.251 |
+| "Does this function reach the bank client?" | call-graph reachability | **mechanical** |
+| "Does a value here flow from an IBAN/amount-typed source?" | data-flow, as the Turku R2/R3 rules do | **mechanical** |
+| "Would a reviewer accept this suggestion?" | recorded accept/reject decisions | **observable, accumulating** |
+
+The third column is the point. A classifier trained on the middle two rows has labels as sound
+as Typilus's, and the regulatory category then comes from a human-reviewed property→provision
+table — which keeps the `policies.py` boundary intact, because the model never asserts a legal
+conclusion.
+
+The fourth row is the long game and costs nothing to start: **log every accept and reject from
+day one.** Those are free, sound, accumulating labels for the only question that ultimately
+matters — would a reviewer have agreed? Typilus-style work is only possible because annotated
+corpora existed to learn from; ours begins the moment the tool ships.
+
+## 4. A cheaper Step 0 than the one planned
+
+Ahmed, Devanbu, Treude & Pradel, 2024, arXiv `2408.05534` — *Can LLMs Replace Manual Annotation
+of Software Engineering Artifacts?* — applied six models to ten annotation tasks from five
+datasets and found LLM agreement "equal or close to human-rater agreement". Their two
+methodological proposals are directly usable:
+
+- **Model–model agreement predicts whether a task is suitable for annotation at all.**
+- **Model confidence selects the specific samples** where a model can safely stand in for a human.
+
+So Step 0 gains a pre-test costing hours rather than two days: have several independent models
+label the same balanced sample 6-way and binary, and compute agreement between *them*. If
+independent models cannot agree on the 6-way label, human annotators will not either, and the
+taxonomy can be collapsed before anyone spends a day labelling. A human pilot still runs — this
+narrows what it has to settle, it does not replace it.
+
+## 5. Step 5 has a field, and a warning attached
+
+Ranking warnings rather than classifying them is a mature area: **Actionable Warning
+Identification**, surveyed across 51 primary studies by Ge et al., 2023, arXiv `2312.00324`.
+Headline results are strong — Yedida et al., arXiv `2205.10504`, report median AUC 92% with
+perfect results on 4 of 8 projects.
+
+**But the lineage has the PrimeVul problem.** Kang, Aw & Lo, 2022, arXiv `2202.05982`, audited
+the widely-used "Golden Features" results and found:
+
+- ground-truth labels **leaked into the features** that measure the proportion of actionable
+  warnings in a context;
+- **test warnings appearing in the training set**;
+- and the warning oracle — a heuristic comparing a revision to a later reference revision —
+  "produces labels that **do not agree with human oracles**", with the choice of reference
+  revision changing the distribution.
+
+Their conclusion: prior performance "is overoptimistic of their true performance if adopted in
+practice". So AWI is the right field for Step 5 and its published numbers are not a target to
+beat. Whether Yedida et al. (May 2022) addressed the leakage Kang et al. reported (February
+2022) was **not determined** and must be read before either is cited.
+
+## 6. What this changes
+
+Step 5 is upgraded from a fallback to the main modelling contribution, and it is now
+*well-founded* rather than merely honest:
+
+- Train a classifier to predict a **mechanically verifiable** structural property, not a legal
+  category. Labels are then as sound as Typilus's, and the α = 0.251 objection does not apply.
+- Report **precision at a chosen coverage**, the Typilus framing, rather than accuracy — a
+  suggester that covers 70% at high precision and abstains on the rest is the demonstrated
+  shape of a useful tool.
+- **Validate every suggestion against the structural rules before showing it**, which is
+  TypeWriter's search-based validation adapted: the proposal must survive the deterministic
+  check or it is not offered.
+- **Log accept/reject decisions from the first day**, as the only sound label source for the
+  question that matters.
+- Cite Typilus, TypeWriter and Type4Py as the template, and the AWI survey plus the Kang
+  replication for the ranking half.
+
+The owner's instinct was right, and more defensible than the design it replaces: a model that
+proposes and abstains, validated mechanically, with a human deciding. The correction is only to
+what it predicts.

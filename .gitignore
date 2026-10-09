@@ -7,3 +7,9 @@ venv/
 *.egg-info/
 .hypothesis/
 .review-packets/
+
+# Claude Code local settings (machine-specific; never commit)
+.claude/settings.local.json
+
+# Agent research notes: working material, not for public history
+.research/
