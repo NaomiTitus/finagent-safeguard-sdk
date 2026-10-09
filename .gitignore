@@ -13,3 +13,6 @@ venv/
 
 # Agent research notes: working material, not for public history
 .research/
+
+# Labelling worksheet: holds third-party source, regenerated from pointers
+benchmark/worksheet.md
