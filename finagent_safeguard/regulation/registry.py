@@ -306,6 +306,9 @@ class ReferencePoint:
 
     parameter: NumericParameter
     governs: str
+    #: Context the cited provision cannot verify on its own. Withheld from the
+    #: entailment judge for the same reason as Obligation.note.
+    note: str = ""
     applies_from: _dt.date | None = None
     operative: Literal[False] = False
 
@@ -417,8 +420,8 @@ PSD2_ART_97_1_B = Provision(
     point="b",
     subdivision_id="art_97",
     obligation_text=(
-        "Member States shall ensure that a payment service provider applies strong "
-        "customer authentication where the payer"
+        "Member States shall ensure that a payment service provider applies strong customer authentication where the payer: ("
+        "a) accesses its payment account online; (b) initiates an electronic payment transaction"
     ),
 )
 
@@ -782,8 +785,13 @@ OBLIGATIONS: tuple[Obligation, ...] = (
         addressee=(Addressee.OBLIGED_ENTITY,),
         enforcing=False,
         rationale=(
-            "Ongoing monitoring is risk-based. There is no amount at which structuring "
-            "becomes reportable; structuring is reportable because it is structuring. "
+            "The provision states no monetary threshold for ongoing monitoring."
+        ),
+        note=(
+            "Structuring is reportable because it is structuring, not because it crosses "
+            "an amount -- but Art. 26(1) routes detected transactions to a more thorough "
+            "assessment under Art. 69(2) and does not itself address reporting, so that "
+            "follows from Art. 69 rather than from this paragraph. "
             "Not enforcing: AMLR applies from 10 July 2027."
         ),
     ),
@@ -792,8 +800,11 @@ OBLIGATIONS: tuple[Obligation, ...] = (
         addressee=(Addressee.OBLIGED_ENTITY,),
         enforcing=False,
         rationale=(
-            "Reporting attaches to suspicion 'regardless of the amount involved'. Any "
-            "monetary trigger here would be both legally unfounded and a structuring "
+            "Reporting attaches to suspicion regardless of the amount involved; the "
+            "provision states no monetary threshold."
+        ),
+        note=(
+            "Any monetary trigger here would be both legally unfounded and a structuring "
             "roadmap. Not enforcing: AMLR applies from 10 July 2027."
         ),
     ),
@@ -836,14 +847,20 @@ REFERENCE_POINTS: tuple[ReferencePoint, ...] = (
             locus=AMLR_ART_19_4,
         ),
         governs=(
-            "Derogation from Art. 19(1), point (b). At an occasional cash transaction of "
-            "at least EUR 3 000, an obliged entity must apply *at least* the customer "
-            "due diligence measure in Art. 20(1), point (a) -- identification and "
-            "verification of the customer -- and not the full CDD package. Simplified "
-            "due diligence under Art. 33 is a separate, risk-based regime, not this. "
-            "Corrected after the first entailment run: this was recorded as a FULL CDD "
-            "trigger, 'not a reduced or simplified regime', which inverts a derogation "
-            "into a wider duty than the text imposes."
+            "By way of derogation from Art. 19(1), point (b): an occasional transaction "
+            "in cash of at least EUR 3 000 requires at least the customer due diligence "
+            "measures referred to in Art. 20(1), point (a)."
+        ),
+        note=(
+            "Art. 20(1), point (a) is identification and verification of the customer; "
+            "its text is not pinned here, so that gloss cannot be verified from Art. 19 "
+            "alone. Simplified due diligence under Art. 33 is a separate, risk-based "
+            "regime and is not what this paragraph creates. "
+            "Corrected after the first entailment run, which found this recorded as a "
+            "FULL CDD trigger, 'not a reduced or simplified regime' -- inverting a "
+            "derogation into a wider duty than the text imposes. Same error class as "
+            "reading the RTS Art. 16 EUR 30 derogation as an SCA trigger, and it was "
+            "mine."
         ),
         applies_from=_dt.date(2027, 7, 10),
     ),
@@ -877,8 +894,13 @@ REFERENCE_POINTS: tuple[ReferencePoint, ...] = (
             "Art. 5(3) derogation from the Art. 4(4) duty to verify payer information "
             "applies. The figure is cited here at Art. 5(2)(b), where it actually "
             "appears; Art. 5(3) incorporates it by reference and contains no monetary "
-            "figure of its own. Governs VERIFICATION, not reporting -- it is commonly "
-            "misdescribed as a reporting threshold and is not one."
+            "figure of its own."
+        ),
+        note=(
+            "Governs verification, not reporting; it is commonly misdescribed as a "
+            "reporting threshold and is not one. Art. 5(2)(b) is itself framed as an "
+            "information-provision duty, so that characterisation rests on Art. 5(3) "
+            "and cannot be read off Art. 5(2)(b) alone."
         ),
     ),
 )
