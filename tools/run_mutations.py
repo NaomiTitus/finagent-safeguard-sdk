@@ -355,6 +355,32 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "drop a provision from the excused list, so a pinned duty is neither "
         "offered nor accounted for and nobody can tell it was forgotten",
     ),
+    # Day 6, the diff ratchet.
+    "C5": (
+        LINT,
+        '    if done.returncode != 0:\n        return None',
+        '    if done.returncode != 0:\n        return {}',
+        "test_an_unusable_ref_is_two_not_a_silent_pass",
+        "treat 'I cannot tell what changed' as 'nothing changed', suppressing "
+        "every finding and reporting success",
+    ),
+    "C6": (
+        LINT,
+        '                for line in range(finding.insert_line, finding.end_line + 1)',
+        '                for line in [finding.insert_line]',
+        "test_editing_a_regulated_function_fails",
+        "ratchet on the signature line alone, waving through a payment body "
+        "rewritten under an untouched signature",
+    ),
+    "C7": (
+        LINT,
+        '            count = int(found.group(2) or 1)',
+        '            count = int(found.group(2) or 0)',
+        "test_editing_a_regulated_function_fails",
+        "treat a hunk with no explicit count as zero lines. A single-line edit "
+        "is written '@@ -5 +5 @@' with no count, so every one-line change to a "
+        "regulated function would pass the ratchet unnoticed",
+    ),
     "L16": (
         LINT,
         '    if any(_matches_tokens(name, PII_TOKENS) for name in names):\n        found.append("pii")',
@@ -450,6 +476,9 @@ BASELINE: dict[str, str] = {
     "A4": "caught",
     "A5": "not_caught",
     "D7": "caught",
+    "C5": "caught",
+    "C6": "caught",
+    "C7": "caught",
     # F-011 narrowed: citation structure is now validated against the span,
     # so fabricating Art. 5(9)(z) is caught. Hand-updated, which is the
     # intended friction -- a mutation becoming caught is a fix worth noticing.
