@@ -288,22 +288,59 @@ class TestRuntimeDiscardedStubs:
         assert [f.function for f in found] == []
 
 
-class TestInsertedCategory:
-    """The category written into a developer's source had no test at all, and
-    no mutation row. It mapped every signal to payments, with a raw-substring
-    override for personal data."""
+class TestWhatIsWrittenIntoSource:
+    """The linter records which words matched; it never names a regulation.
 
-    def test_personal_data_gets_the_gdpr_category(self, tmp_path: Path) -> None:
-        found = _findings(tmp_path, "def store(ssn: str, dob: str, phone: str) -> None:\n    pass\n")
-        assert found[0].category == "GDPR_PII_PROCESSING"
+    The predecessor of these tests asserted a *category* -- money got
+    PSD2_PAYMENT_EXECUTION, person-words got GDPR_PII_PROCESSING. Measured on
+    real code that mapping was inverted: a GUI focus handler was filed as a
+    payment, Saleor's `capture(payment, amount, customer_id)` as personal data,
+    and real ISO 20022 payment builders were not flagged at all. Trained
+    annotators reach alpha 0.251 on the six-way judgement, so the tool now
+    declines to make it.
+    """
 
-    def test_money_gets_the_payments_category(self, tmp_path: Path) -> None:
+    def test_only_the_refusal_is_ever_written(self, tmp_path: Path) -> None:
+        for source in (
+            "def store(ssn: str, dob: str, phone: str) -> None:\n    pass\n",
+            "from decimal import Decimal\n\n\ndef settle(amount: Decimal) -> None:\n    pass\n",
+        ):
+            found = _findings(tmp_path, source)
+            assert found[0].category == "REVIEW_REQUIRED"
+
+    def test_money_words_are_recorded_as_money(self, tmp_path: Path) -> None:
         found = _findings(
-            tmp_path, "from decimal import Decimal\n\n\ndef settle(amount: Decimal) -> None:\n    pass\n"
+            tmp_path,
+            "from decimal import Decimal\n\n\ndef settle(amount: Decimal) -> None:\n    pass\n",
         )
-        assert found[0].category == "PSD2_PAYMENT_EXECUTION"
+        assert found[0].vocabularies == ("money",)
 
-    def test_a_lookalike_does_not_get_the_gdpr_category(self, tmp_path: Path) -> None:
+    def test_person_words_are_recorded_as_pii(self, tmp_path: Path) -> None:
+        found = _findings(tmp_path, "def store(ssn: str, dob: str, phone: str) -> None:\n    pass\n")
+        assert found[0].vocabularies == ("pii",)
+
+    def test_both_are_recorded_when_both_match(self, tmp_path: Path) -> None:
+        """The defect the whole category debate turned on. `_category_for`
+        tested person-words first and returned on the first match, so anything
+        carrying both resolved to GDPR and payments never won -- firing on the
+        most regulated functions precisely because they carry both."""
+        found = _findings(
+            tmp_path,
+            "from decimal import Decimal\n\n\n"
+            "def capture(payment: str, amount: Decimal, customer_id: str) -> None:\n    pass\n",
+        )
+        assert found[0].vocabularies == ("money", "pii")
+
+    def test_the_order_is_stable(self, tmp_path: Path) -> None:
+        """Money before person data, always. An unstable order would make the
+        inserted comment churn between runs and the diff unreadable."""
+        found = _findings(
+            tmp_path,
+            "def transfer(customer_email: str, iban: str) -> None:\n    pass\n",
+        )
+        assert found[0].vocabularies == ("money", "pii")
+
+    def test_a_lookalike_is_not_recorded_as_personal_data(self, tmp_path: Path) -> None:
         """`expand_balance_window` was labelled GDPR because "expand" contains
         "pan"."""
         found = _findings(
@@ -311,7 +348,26 @@ class TestInsertedCategory:
             "from decimal import Decimal\n\n\n"
             "def expand_balance_window(amount: Decimal) -> None:\n    pass\n",
         )
-        assert found[0].category == "PSD2_PAYMENT_EXECUTION"
+        assert "pii" not in found[0].vocabularies
+
+    def test_the_inserted_comment_names_the_evidence_not_a_conclusion(
+        self, tmp_path: Path
+    ) -> None:
+        """The old comment wrote a guessed category and appended "confirm the
+        category", which got the emphasis backwards: the guess read as the
+        answer and the confirmation as paperwork."""
+        from finagent_safeguard.cli.linter import _render_decorator
+
+        found = _findings(
+            tmp_path,
+            "from decimal import Decimal\n\n\ndef settle(amount: Decimal) -> None:\n    pass\n",
+        )
+        line = _render_decorator(found[0])
+        assert "REVIEW_REQUIRED" in line
+        assert "money" in line
+        assert "Replace with the category you have confirmed" in line
+        for category in ("PSD2", "GDPR", "AML", "DORA"):
+            assert category not in line
 
 
 class TestBankReachability:

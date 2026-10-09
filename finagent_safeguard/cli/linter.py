@@ -134,9 +134,16 @@ class Finding:
     indent: str
     #: Which signal fired. Reported so a developer can judge a false positive.
     signal: str
-    #: The category --fix would insert. Derived here, where the parameter names
-    #: are in hand, rather than re-guessed from the function name alone.
+    #: What --fix writes after ``FinancialCategory.``. Always
+    #: ``PROPOSED_CATEGORY``; it stays a field rather than a constant so the
+    #: write path has one place to validate and the fifth guard has something
+    #: to reject.
     category: str
+    #: Which token families matched -- "money", "pii", or both. Recorded where
+    #: the parameter names are in hand. Not a category and not a legal claim:
+    #: it is a record of which words appeared, and the input the
+    #: candidate-provision mapping will read.
+    vocabularies: tuple[str, ...]
     #: SHA-256 of the source this finding describes. Comparing line numbers and
     #: names is not enough: a concurrent save that preserves both -- an edit
     #: inside a function body -- would otherwise be silently overwritten.
@@ -261,11 +268,39 @@ def _reaches_bank(tree: ast.AST) -> bool:
     return False
 
 
-def _category_for(names: set[str]) -> str:
-    """Payments unless the identifiers point at a person."""
-    if any(_matches_tokens(n, PII_TOKENS) for n in names):
-        return "GDPR_PII_PROCESSING"
-    return "PSD2_PAYMENT_EXECUTION"
+#: What the linter writes. Never a category.
+#:
+#: The tool finds the function; it does not decide which regulation applies.
+#: Trained annotators reach a Krippendorff's alpha of 0.251 on that six-way
+#: judgement and the best of eleven published methods on the nearest benchmark
+#: scored 5.75% macro-F1, so a category written here would be confidently
+#: wrong -- and a false compliance claim sitting in a developer's source is
+#: worse than an admission that the tool does not know.
+PROPOSED_CATEGORY: Final[str] = "REVIEW_REQUIRED"
+
+
+def _vocabularies(names: set[str]) -> tuple[str, ...]:
+    """Which token families the identifiers matched, in a stable order.
+
+    This replaced ``_category_for``, which returned a single category and
+    checked the person-words first, so anything matching both resolved to GDPR
+    and payments never won. That tie-break fired on the most regulated
+    functions precisely because they carry both -- Saleor's
+    ``capture(payment, amount, customer_id)`` was filed as personal data rather
+    than payment.
+
+    A record of which words matched is not a legal conclusion, so both can be
+    true at once and nothing has to be invented to break the tie. It is also
+    the input the candidate-provision mapping needs: money words point at the
+    payment and transfer-of-funds provisions, person words at the data
+    protection ones.
+    """
+    found: list[str] = []
+    if any(_matches_tokens(name, MONEY_TOKENS) for name in names):
+        found.append("money")
+    if any(_matches_tokens(name, PII_TOKENS) for name in names):
+        found.append("pii")
+    return tuple(found)
 
 
 def _overload_names(tree: ast.AST) -> set[str]:
@@ -311,8 +346,8 @@ def _is_runtime_discarded(
 
 def _signal_for(
     node: ast.FunctionDef | ast.AsyncFunctionDef, *, bank: bool
-) -> tuple[str, str] | None:
-    """Which signal fires, and which category it implies. None if neither."""
+) -> tuple[str, tuple[str, ...]] | None:
+    """Which signal fires, and which token families matched. None if neither."""
     args = node.args
     all_args = [
         *args.posonlyargs, *args.args, *args.kwonlyargs,
@@ -321,17 +356,17 @@ def _signal_for(
     ]
     names = {node.name, *(a.arg for a in all_args)}
     if any(_matches_tokens(name, NAME_TOKENS) for name in names):
-        return "name", _category_for(names)
+        return "name", _vocabularies(names)
 
     annotated = [a.annotation for a in all_args if a.annotation]
     if node.returns is not None:
         annotated.append(node.returns)
     for annotation in annotated:
         if _annotation_names(annotation) & RISKY_ANNOTATIONS:
-            return "type", _category_for(names)
+            return "type", _vocabularies(names)
 
     if bank and not node.name.startswith("_"):
-        return "bank_client_import", _category_for(names)
+        return "bank_client_import", _vocabularies(names)
     return None
 
 
@@ -364,7 +399,7 @@ def scan_source(source: str, path: Path) -> list[Finding]:
                 ):
                     matched = _signal_for(child, bank=bank)
                     if matched is not None:
-                        signal, category = matched
+                        signal, vocabularies = matched
                         line = min(
                             [child.lineno, *(d.lineno for d in child.decorator_list)]
                         )
@@ -377,7 +412,8 @@ def scan_source(source: str, path: Path) -> list[Finding]:
                                 insert_line=line,
                                 indent=leading,
                                 signal=signal,
-                                category=category,
+                                category=PROPOSED_CATEGORY,
+                                vocabularies=vocabularies,
                                 source_sha=digest,
                             )
                         )
@@ -462,10 +498,19 @@ class FixResult:
 
 
 def _render_decorator(finding: Finding) -> str:
+    """The decorator line, which names no regulation.
+
+    It used to write a guessed category with "confirm the category" appended,
+    which got the emphasis exactly wrong: the guess looked like the answer and
+    the confirmation looked like paperwork. Measured, that guess was inverted
+    on real code -- a GUI focus handler filed as a payment, real ISO 20022
+    payment builders not flagged at all.
+    """
+    matched = "+".join(finding.vocabularies) or finding.signal
     return (
         f"@regulated_tool(FinancialCategory.{finding.category})"
-        f"  # TODO(finagent): inserted by linter from the {finding.signal!r} "
-        "signal; confirm the category"
+        f"  # finagent-lint: {matched} identifiers, {finding.signal} signal."
+        " Replace with the category you have confirmed."
     )
 
 

@@ -260,12 +260,46 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "stop recognising REVIEW_REQUIRED in a decorator, so a flagged "
         "function passes the gate as classified",
     ),
+    "L29": (
+        LINT,
+        'PROPOSED_CATEGORY: Final[str] = "REVIEW_REQUIRED"',
+        'PROPOSED_CATEGORY: Final[str] = "PSD2_PAYMENT_EXECUTION"',
+        "test_only_the_refusal_is_ever_written",
+        "let the tool assert a category again, writing a legal conclusion it "
+        "has no basis for into a developer's source",
+    ),
+    "L30": (
+        LINT,
+        '        found.append("money")',
+        '        return ("money",)',
+        "test_both_are_recorded_when_both_match",
+        "return on the first vocabulary match, reinstating the arbitrary "
+        "tie-break that fired on the most regulated functions precisely "
+        "because they carry both",
+    ),
+    "C4": (
+        LINT,
+        '            problems.append(f"{raw}: no such file or directory")',
+        '            pass',
+        "test_a_missing_path_exits_two",
+        "swallow a path that does not exist, so a typo makes the linter scan "
+        "nothing and exit clean -- silently disabling the gate",
+    ),
+    "A7": (
+        AGENT,
+        '        "classification, and this gate will not accept it as one.\\n\\n"',
+        '        "category.\\n\\n"',
+        "test_the_message_names_the_remedy_not_the_diagnosis",
+        "replace the message that tells a developer what to do with one that "
+        "only says something is wrong",
+    ),
     "L16": (
         LINT,
-        '    if any(_matches_tokens(n, PII_TOKENS) for n in names):\n        return "GDPR_PII_PROCESSING"',
-        '    if False:\n        return "GDPR_PII_PROCESSING"',
-        "test_personal_data_gets_the_gdpr_category",
-        "write a payments category onto personal-data functions",
+        '    if any(_matches_tokens(name, PII_TOKENS) for name in names):\n        found.append("pii")',
+        '    if False:\n        found.append("pii")',
+        "test_person_words_are_recorded_as_pii",
+        "stop recording the personal-data vocabulary, so a function handling "
+        "both money and people looks purely financial",
     ),
     "L17": (
         LINT,
@@ -395,6 +429,10 @@ BASELINE: dict[str, str] = {
     "C1": "caught",
     "C2": "caught",
     "C3": "caught",
+    "L29": "caught",
+    "L30": "caught",
+    "C4": "caught",
+    "A7": "caught",
 }
 
 
