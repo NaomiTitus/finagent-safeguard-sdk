@@ -205,12 +205,101 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "stop splitting multi-word tokens into words, so matching falls "
         "back to a substring test",
     ),
+    # Day 4. REVIEW_REQUIRED and the fifth write guard had no rows at all, and
+    # layer 1c of the review protocol caught that before they shipped: a guard
+    # nothing can prove is working is not protected.
+    "L27": (
+        LINT,
+        '        {f.category for f in findings if f.category not in _VALID_CATEGORIES}',
+        '        set()',
+        "test_an_unknown_category_is_refused",
+        "drop the fifth guard, letting --fix write a category that is not an "
+        "enum member and produce a file that AttributeErrors on import",
+    ),
+    "L28": (
+        LINT,
+        '_VALID_CATEGORIES: frozenset[str] = frozenset(m.name for m in FinancialCategory)',
+        '_VALID_CATEGORIES: frozenset[str] = frozenset({"PSD2_PAYMENT_EXECUTION"})',
+        "test_the_valid_set_is_read_from_the_enum",
+        "restate the member names instead of reading the enum, so the guard "
+        "drifts out of step with what the linter may emit",
+    ),
+    "A6": (
+        AGENT,
+        '        if FinancialCategory.REVIEW_REQUIRED in registration.categories:',
+        '        if False:',
+        "test_a_tool_carrying_it_is_refused",
+        "let the runtime gate accept REVIEW_REQUIRED as a classification, so "
+        "the one state that exists to demand human judgement passes the gate "
+        "that exists to require it",
+    ),
+    # Day 4, the CLI. Layer 1c flagged these as unprotected before they
+    # shipped, for the second time in one day.
+    "C1": (
+        LINT,
+        'ADVISORY_SIGNALS: Final[frozenset[str]] = frozenset({"bank_client_import"})',
+        'ADVISORY_SIGNALS: Final[frozenset[str]] = frozenset()',
+        "test_an_advisory_only_finding_does_not_fail_by_default",
+        "empty the advisory set, making the weakest signal build-breaking by "
+        "default -- 51 flags and 0 correct ones over 155 stdlib modules",
+    ),
+    "C2": (
+        LINT,
+        '        except (UnparseableSource, SyntaxError) as exc:',
+        '        except SyntaxError as exc:',
+        "test_an_unparseable_file_exits_two",
+        "let UnparseableSource escape, crashing the process so that Python's "
+        "exit 1 makes a failed run look like a successful one that found "
+        "something",
+    ),
+    "C3": (
+        LINT,
+        '                            and argument.attr == _UNRESOLVED',
+        '                            and argument.attr == "NOT_A_CATEGORY"',
+        "test_an_unresolved_flag_fails_the_run",
+        "stop recognising REVIEW_REQUIRED in a decorator, so a flagged "
+        "function passes the gate as classified",
+    ),
+    "L29": (
+        LINT,
+        'PROPOSED_CATEGORY: Final[str] = "REVIEW_REQUIRED"',
+        'PROPOSED_CATEGORY: Final[str] = "PSD2_PAYMENT_EXECUTION"',
+        "test_only_the_refusal_is_ever_written",
+        "let the tool assert a category again, writing a legal conclusion it "
+        "has no basis for into a developer's source",
+    ),
+    "L30": (
+        LINT,
+        '        found.append("money")',
+        '        return ("money",)',
+        "test_both_are_recorded_when_both_match",
+        "return on the first vocabulary match, reinstating the arbitrary "
+        "tie-break that fired on the most regulated functions precisely "
+        "because they carry both",
+    ),
+    "C4": (
+        LINT,
+        '            problems.append(f"{raw}: no such file or directory")',
+        '            pass',
+        "test_a_missing_path_exits_two",
+        "swallow a path that does not exist, so a typo makes the linter scan "
+        "nothing and exit clean -- silently disabling the gate",
+    ),
+    "A7": (
+        AGENT,
+        '        "classification, and this gate will not accept it as one.\\n\\n"',
+        '        "category.\\n\\n"',
+        "test_the_message_names_the_remedy_not_the_diagnosis",
+        "replace the message that tells a developer what to do with one that "
+        "only says something is wrong",
+    ),
     "L16": (
         LINT,
-        '    if any(_matches_tokens(n, PII_TOKENS) for n in names):\n        return "GDPR_PII_PROCESSING"',
-        '    if False:\n        return "GDPR_PII_PROCESSING"',
-        "test_personal_data_gets_the_gdpr_category",
-        "write a payments category onto personal-data functions",
+        '    if any(_matches_tokens(name, PII_TOKENS) for name in names):\n        found.append("pii")',
+        '    if False:\n        found.append("pii")',
+        "test_person_words_are_recorded_as_pii",
+        "stop recording the personal-data vocabulary, so a function handling "
+        "both money and people looks purely financial",
     ),
     "L17": (
         LINT,
@@ -334,6 +423,16 @@ BASELINE: dict[str, str] = {
     "L24": "caught",
     "L25": "caught",
     "L26": "caught",
+    "L27": "caught",
+    "L28": "caught",
+    "A6": "caught",
+    "C1": "caught",
+    "C2": "caught",
+    "C3": "caught",
+    "L29": "caught",
+    "L30": "caught",
+    "C4": "caught",
+    "A7": "caught",
 }
 
 

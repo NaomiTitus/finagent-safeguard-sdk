@@ -51,6 +51,26 @@ class UnregulatedToolError(Exception):
     """
 
 
+def _report_unresolved(unresolved: list[str]) -> str:
+    """Message for tools carrying the linter's refusal rather than a category.
+
+    Separate from the unclassified message because the remedy differs. An
+    unclassified tool was never looked at; an unresolved one was found, flagged,
+    and shipped anyway. Saying "classify this" to someone who already has the
+    linter's output in front of them is unhelpful.
+    """
+    listed = "\n".join(f"  - {name}" for name in unresolved)
+    return (
+        f"{len(unresolved)} tool(s) passed to this agent carry "
+        f"FinancialCategory.REVIEW_REQUIRED:\n{listed}\n\n"
+        "REVIEW_REQUIRED is the linter's statement that it found a regulated "
+        "function and had no basis to name the regulation. It is not a "
+        "classification, and this gate will not accept it as one.\n\n"
+        "Replace it with the category you have confirmed against the provision. "
+        "`finagent-lint` prints the candidate provisions it considered."
+    )
+
+
 def _report(unclassified: Sequence[str]) -> str:
     listed = "\n".join(f"  - {name}" for name in unclassified)
     return (
@@ -75,16 +95,27 @@ def _require_classification(
     """
     categories: set[FinancialCategory] = set()
     unclassified: list[str] = []
+    unresolved: list[str] = []
 
     for tool in tools:
         registration = lookup(tool)
         if registration is None:
             unclassified.append(registry_key(tool))
-        else:
-            categories |= registration.categories
+            continue
+        # A registration is not the same as a decision. REVIEW_REQUIRED is the
+        # linter saying it found a regulated function and could not name the
+        # regulation; treating it as a category here would let the one state
+        # that exists to demand human judgement sail through the gate that
+        # exists to require it.
+        if FinancialCategory.REVIEW_REQUIRED in registration.categories:
+            unresolved.append(registry_key(tool))
+            continue
+        categories |= registration.categories
 
     if unclassified:
         raise UnregulatedToolError(_report(unclassified))
+    if unresolved:
+        raise UnregulatedToolError(_report_unresolved(unresolved))
 
     return frozenset(categories)
 

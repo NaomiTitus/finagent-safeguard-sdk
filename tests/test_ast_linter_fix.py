@@ -733,3 +733,84 @@ class TestFixIsFastEnoughToUse:
         started = time.monotonic()
         _fix(p)
         assert time.monotonic() - started < 0.5
+
+
+class TestTheFifthGuard:
+    """What we *add* must work, not just leave the file undamaged.
+
+    The other four guards check that the edit did not break the developer's
+    code: it parses, the function set is unchanged, the decorator landed where
+    intended, no original byte moved. None of them checks that the decorator we
+    inserted references something that exists.
+
+    A category absent from FinancialCategory produced a file that satisfied all
+    four and raised AttributeError on import -- and the tool reported success.
+    That is the failure class this project exists to prevent, found in the
+    guard built to prevent it.
+    """
+
+    def test_an_unknown_category_is_refused(self, tmp_path: Path) -> None:
+        import dataclasses
+
+        p = tmp_path / "m.py"
+        p.write_text(
+            "from decimal import Decimal\n\n\n"
+            "def transfer(amount: Decimal, iban: str) -> None:\n    pass\n"
+        )
+        findings = linter.scan_file(p)
+        findings[0] = dataclasses.replace(findings[0], category="TOTALLY_MADE_UP")
+        with pytest.raises(linter.UnsafeEdit, match="not a member of FinancialCategory"):
+            linter.apply_fix(p, findings)
+
+    def test_nothing_is_written_when_it_refuses(self, tmp_path: Path) -> None:
+        """Refusing after writing would be worse than not checking."""
+        import dataclasses
+
+        p = tmp_path / "m.py"
+        original = (
+            "from decimal import Decimal\n\n\n"
+            "def transfer(amount: Decimal, iban: str) -> None:\n    pass\n"
+        )
+        p.write_text(original)
+        findings = linter.scan_file(p)
+        findings[0] = dataclasses.replace(findings[0], category="NOPE")
+        with pytest.raises(linter.UnsafeEdit):
+            linter.apply_fix(p, findings)
+        assert p.read_text() == original
+
+    def test_review_required_is_accepted_and_imports(self, tmp_path: Path) -> None:
+        """The flag the linter actually writes must survive its own guard and
+        produce an importable file. Before REVIEW_REQUIRED joined the enum this
+        wrote a file that raised AttributeError."""
+        import dataclasses
+        import subprocess
+        import sys
+
+        import dataclasses
+
+        p = tmp_path / "m.py"
+        p.write_text(
+            "from decimal import Decimal\n\n\n"
+            "def transfer(amount: Decimal, iban: str) -> None:\n    pass\n"
+        )
+        findings = linter.scan_file(p)
+        findings[0] = dataclasses.replace(findings[0], category="REVIEW_REQUIRED")
+        linter.apply_fix(p, findings)
+
+        assert "FinancialCategory.REVIEW_REQUIRED" in p.read_text()
+        done = subprocess.run(
+            [sys.executable, "-c", f"import runpy; runpy.run_path({str(p)!r})"],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).resolve().parents[1],
+        )
+        assert done.returncode == 0, done.stderr
+
+    def test_the_valid_set_is_read_from_the_enum(self) -> None:
+        """Restating the member names would let the guard drift out of step
+        with what the linter may emit -- the guard would then reject a category
+        the enum had gained, or admit one it had lost."""
+        from finagent_safeguard.cli.linter import _VALID_CATEGORIES
+        from finagent_safeguard.taxonomy.policies import FinancialCategory
+
+        assert _VALID_CATEGORIES == frozenset(m.name for m in FinancialCategory)

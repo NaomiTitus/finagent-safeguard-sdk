@@ -27,11 +27,15 @@ import hashlib
 import os
 import re
 import stat
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from finagent_safeguard.taxonomy.policies import FinancialCategory
+
 __all__ = [
+    "ADVISORY_SIGNALS",
     "Finding",
     "FixPlan",
     "FixResult",
@@ -42,6 +46,8 @@ __all__ = [
     "UnparseableSource",
     "UnsafeEdit",
     "apply_fix",
+    "main",
+    "unresolved_functions",
     "read_source",
     "scan_file",
     "scan_source",
@@ -128,9 +134,16 @@ class Finding:
     indent: str
     #: Which signal fired. Reported so a developer can judge a false positive.
     signal: str
-    #: The category --fix would insert. Derived here, where the parameter names
-    #: are in hand, rather than re-guessed from the function name alone.
+    #: What --fix writes after ``FinancialCategory.``. Always
+    #: ``PROPOSED_CATEGORY``; it stays a field rather than a constant so the
+    #: write path has one place to validate and the fifth guard has something
+    #: to reject.
     category: str
+    #: Which token families matched -- "money", "pii", or both. Recorded where
+    #: the parameter names are in hand. Not a category and not a legal claim:
+    #: it is a record of which words appeared, and the input the
+    #: candidate-provision mapping will read.
+    vocabularies: tuple[str, ...]
     #: SHA-256 of the source this finding describes. Comparing line numbers and
     #: names is not enough: a concurrent save that preserves both -- an edit
     #: inside a function body -- would otherwise be silently overwritten.
@@ -255,11 +268,39 @@ def _reaches_bank(tree: ast.AST) -> bool:
     return False
 
 
-def _category_for(names: set[str]) -> str:
-    """Payments unless the identifiers point at a person."""
-    if any(_matches_tokens(n, PII_TOKENS) for n in names):
-        return "GDPR_PII_PROCESSING"
-    return "PSD2_PAYMENT_EXECUTION"
+#: What the linter writes. Never a category.
+#:
+#: The tool finds the function; it does not decide which regulation applies.
+#: Trained annotators reach a Krippendorff's alpha of 0.251 on that six-way
+#: judgement and the best of eleven published methods on the nearest benchmark
+#: scored 5.75% macro-F1, so a category written here would be confidently
+#: wrong -- and a false compliance claim sitting in a developer's source is
+#: worse than an admission that the tool does not know.
+PROPOSED_CATEGORY: Final[str] = "REVIEW_REQUIRED"
+
+
+def _vocabularies(names: set[str]) -> tuple[str, ...]:
+    """Which token families the identifiers matched, in a stable order.
+
+    This replaced ``_category_for``, which returned a single category and
+    checked the person-words first, so anything matching both resolved to GDPR
+    and payments never won. That tie-break fired on the most regulated
+    functions precisely because they carry both -- Saleor's
+    ``capture(payment, amount, customer_id)`` was filed as personal data rather
+    than payment.
+
+    A record of which words matched is not a legal conclusion, so both can be
+    true at once and nothing has to be invented to break the tie. It is also
+    the input the candidate-provision mapping needs: money words point at the
+    payment and transfer-of-funds provisions, person words at the data
+    protection ones.
+    """
+    found: list[str] = []
+    if any(_matches_tokens(name, MONEY_TOKENS) for name in names):
+        found.append("money")
+    if any(_matches_tokens(name, PII_TOKENS) for name in names):
+        found.append("pii")
+    return tuple(found)
 
 
 def _overload_names(tree: ast.AST) -> set[str]:
@@ -305,8 +346,8 @@ def _is_runtime_discarded(
 
 def _signal_for(
     node: ast.FunctionDef | ast.AsyncFunctionDef, *, bank: bool
-) -> tuple[str, str] | None:
-    """Which signal fires, and which category it implies. None if neither."""
+) -> tuple[str, tuple[str, ...]] | None:
+    """Which signal fires, and which token families matched. None if neither."""
     args = node.args
     all_args = [
         *args.posonlyargs, *args.args, *args.kwonlyargs,
@@ -315,17 +356,17 @@ def _signal_for(
     ]
     names = {node.name, *(a.arg for a in all_args)}
     if any(_matches_tokens(name, NAME_TOKENS) for name in names):
-        return "name", _category_for(names)
+        return "name", _vocabularies(names)
 
     annotated = [a.annotation for a in all_args if a.annotation]
     if node.returns is not None:
         annotated.append(node.returns)
     for annotation in annotated:
         if _annotation_names(annotation) & RISKY_ANNOTATIONS:
-            return "type", _category_for(names)
+            return "type", _vocabularies(names)
 
     if bank and not node.name.startswith("_"):
-        return "bank_client_import", _category_for(names)
+        return "bank_client_import", _vocabularies(names)
     return None
 
 
@@ -358,7 +399,7 @@ def scan_source(source: str, path: Path) -> list[Finding]:
                 ):
                     matched = _signal_for(child, bank=bank)
                     if matched is not None:
-                        signal, category = matched
+                        signal, vocabularies = matched
                         line = min(
                             [child.lineno, *(d.lineno for d in child.decorator_list)]
                         )
@@ -371,7 +412,8 @@ def scan_source(source: str, path: Path) -> list[Finding]:
                                 insert_line=line,
                                 indent=leading,
                                 signal=signal,
-                                category=category,
+                                category=PROPOSED_CATEGORY,
+                                vocabularies=vocabularies,
                                 source_sha=digest,
                             )
                         )
@@ -435,6 +477,12 @@ CATEGORY_IMPORT: Final = (
 #: Every inserted line carries a TODO so the developer must look at it, which is
 
 
+#: Every name the tool may legally write after ``FinancialCategory.``. Read
+#: from the enum rather than restated, so a member added or renamed there
+#: cannot drift out of step with what the linter will emit.
+_VALID_CATEGORIES: frozenset[str] = frozenset(m.name for m in FinancialCategory)
+
+
 class UnsafeEdit(Exception):
     """The edited source no longer defines the same functions. Nothing written."""
 
@@ -450,10 +498,19 @@ class FixResult:
 
 
 def _render_decorator(finding: Finding) -> str:
+    """The decorator line, which names no regulation.
+
+    It used to write a guessed category with "confirm the category" appended,
+    which got the emphasis exactly wrong: the guess looked like the answer and
+    the confirmation looked like paperwork. Measured, that guess was inverted
+    on real code -- a GUI focus handler filed as a payment, real ISO 20022
+    payment builders not flagged at all.
+    """
+    matched = "+".join(finding.vocabularies) or finding.signal
     return (
         f"@regulated_tool(FinancialCategory.{finding.category})"
-        f"  # TODO(finagent): inserted by linter from the {finding.signal!r} "
-        "signal; confirm the category"
+        f"  # finagent-lint: {matched} identifiers, {finding.signal} signal."
+        " Replace with the category you have confirmed."
     )
 
 
@@ -701,6 +758,28 @@ def plan_fix(path: Path, findings: list[Finding]) -> FixPlan:
             f"exactly {intended}. Nothing written."
         )
 
+    # Fifth guard: the decorator we are about to write must reference a real
+    # enum member.
+    #
+    # The other four check that we did not damage the developer's file. None of
+    # them checks that what we *added* works. A category not present on
+    # FinancialCategory produces a file that parses, keeps every function, is a
+    # pure insertion, and raises AttributeError the moment anyone imports it --
+    # and all four guards reported success while it did so.
+    #
+    # Deliberately static. Verifying importability properly would mean executing
+    # the module, which means executing arbitrary developer code inside a
+    # linter, which is not a trade a linter gets to make. So the check is
+    # narrowed to the one thing the tool itself emits and therefore owns.
+    unknown_categories = sorted(
+        {f.category for f in findings if f.category not in _VALID_CATEGORIES}
+    )
+    if unknown_categories:
+        raise UnsafeEdit(
+            f"{path}: would write FinancialCategory.{unknown_categories[0]}, which "
+            f"is not a member of FinancialCategory. Nothing written."
+        )
+
     new_bytes = bom + modified.encode()
     envelope = _only_insertions(raw, new_bytes)
     if envelope:
@@ -742,3 +821,210 @@ def apply_fix(path: Path, findings: list[Finding]) -> FixResult:
         tmp.unlink(missing_ok=True)
 
     return FixResult(inserted=plan.inserted, functions=plan.functions)
+
+
+# --------------------------------------------------------------------------
+# Command line
+# --------------------------------------------------------------------------
+#: Signals whose measured precision is too poor to fail a build on by default.
+#:
+#: The bank-client-import backstop fires on any function in a module that can
+#: reach the bank client, which is deliberately broad -- it is the net that
+#: catches functions no naming convention would reveal. Measured on 155
+#: top-level stdlib modules it produced 51 flags and 0 correct ones, so a build
+#: that fails on it fails constantly and gets switched off. Reported always,
+#: counted towards the exit status only under --strict.
+ADVISORY_SIGNALS: Final[frozenset[str]] = frozenset({"bank_client_import"})
+
+_UNRESOLVED = "REVIEW_REQUIRED"
+
+
+def unresolved_functions(source: str) -> list[str]:
+    """Dotted names of functions carrying the linter's refusal to classify.
+
+    Resolved through the AST rather than by searching the text for
+    "REVIEW_REQUIRED", because a substring test over source has been the cause
+    of three separate defects in this file -- a docstring mentioning an import
+    suppressed it, a token matched the middle of an unrelated identifier, and a
+    comment counted as a decorator.
+    """
+    out: list[str] = []
+
+    def walk(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                walk(child, f"{prefix}{child.name}.")
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for decorator in child.decorator_list:
+                    if not isinstance(decorator, ast.Call):
+                        continue
+                    for argument in decorator.args:
+                        if (
+                            isinstance(argument, ast.Attribute)
+                            and argument.attr == _UNRESOLVED
+                        ):
+                            out.append(f"{prefix}{child.name}")
+                            break
+                walk(child, f"{prefix}{child.name}.")
+
+    walk(ast.parse(source), "")
+    return out
+
+
+def _python_files(paths: list[str]) -> tuple[list[Path], list[str]]:
+    """Expand arguments into files, and report what could not be used.
+
+    Directories are walked; anything else is taken literally so that a
+    misspelled path is an error rather than a silently empty run -- a linter
+    that exits 0 because it scanned nothing is worse than one that fails.
+    """
+    found: list[Path] = []
+    problems: list[str] = []
+    for raw in paths:
+        target = Path(raw)
+        if target.is_dir():
+            found.extend(sorted(p for p in target.rglob("*.py")))
+        elif target.is_file():
+            found.append(target)
+        else:
+            problems.append(f"{raw}: no such file or directory")
+    return found, problems
+
+
+def _describe(finding: Finding) -> str:
+    advisory = " (advisory)" if finding.signal in ADVISORY_SIGNALS else ""
+    return (
+        f"  {finding.path}:{finding.insert_line}: {finding.function} "
+        f"[{finding.signal}]{advisory}"
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entry point for ``finagent-lint``.
+
+    Exit status is the whole interface as far as CI is concerned:
+
+      0  nothing to do
+      1  a regulated function is unclassified, or carries REVIEW_REQUIRED
+      2  the run itself failed -- bad path, unreadable or unparseable file
+
+    2 is kept distinct from 1 because they mean opposite things to a pipeline.
+    1 says the tool worked and found something; 2 says the tool did not work,
+    and treating that as "clean" is how a gate silently stops gating.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="finagent-lint",
+        description=(
+            "Find functions handling money or personal data that can reach a "
+            "bank client, and flag them for classification. The tool proposes; "
+            "a developer confirms."
+        ),
+    )
+    parser.add_argument("paths", nargs="*", default=["."], help="files or directories")
+    parser.add_argument(
+        "--fix", action="store_true", help="insert the flag (writes to files)"
+    )
+    parser.add_argument(
+        "--diff-only",
+        action="store_true",
+        help="print the edit --fix would make, and write nothing",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=f"also fail on advisory signals ({', '.join(sorted(ADVISORY_SIGNALS))})",
+    )
+    args = parser.parse_args(argv)
+
+    if args.fix and args.diff_only:
+        parser.error("--fix and --diff-only are contradictory; pick one")
+
+    files, problems = _python_files(args.paths or ["."])
+    for problem in problems:
+        print(f"error: {problem}", file=sys.stderr)
+    if problems:
+        return 2
+
+    actionable = 0
+    advisory = 0
+    unresolved_total = 0
+    written = 0
+    failures: list[str] = []
+
+    for path in files:
+        try:
+            source = read_source(path)
+        except (OSError, UnparseableSource) as exc:
+            failures.append(f"{path}: {exc}")
+            continue
+
+        try:
+            findings = scan_source(source, path)
+            still_open = unresolved_functions(source)
+        except (UnparseableSource, SyntaxError) as exc:
+            # UnparseableSource is a plain Exception, not a SyntaxError, so
+            # catching only the latter let it escape and crash the process with
+            # a traceback. Python exits 1 on an uncaught exception, so the run
+            # looked like "the tool worked and found something" when in fact it
+            # had fallen over -- the one confusion the 1/2 split exists to
+            # prevent.
+            failures.append(f"{path}: {exc}")
+            continue
+
+        for name in still_open:
+            unresolved_total += 1
+            print(f"  {path}: {name} carries {_UNRESOLVED}; confirm the category")
+
+        if not findings:
+            continue
+
+        for finding in findings:
+            if finding.signal in ADVISORY_SIGNALS:
+                advisory += 1
+            else:
+                actionable += 1
+            print(_describe(finding))
+
+        if args.diff_only:
+            try:
+                plan = plan_fix(path, findings)
+            except (RefusedTarget, StaleFindings, UnsafeEdit) as exc:
+                failures.append(f"{path}: {exc}")
+                continue
+            print(plan.diff, end="" if plan.diff.endswith("\n") else "\n")
+        elif args.fix:
+            try:
+                result = apply_fix(path, findings)
+            except (RefusedTarget, StaleFindings, UnsafeEdit) as exc:
+                failures.append(f"{path}: {exc}")
+                continue
+            written += result.inserted
+            print(f"  fixed {path}: {result.inserted} flag(s) inserted")
+
+    for failure in failures:
+        print(f"error: {failure}", file=sys.stderr)
+
+    counted = actionable + (advisory if args.strict else 0)
+    print(
+        f"\n{len(files)} file(s) scanned. "
+        f"{actionable} actionable, {advisory} advisory, "
+        f"{unresolved_total} unresolved."
+        + (f" {written} flag(s) written." if args.fix else "")
+    )
+
+    if failures:
+        # A file the tool could not read or parse is not a clean file. Reporting
+        # 0 here would let a syntax error disable the gate for that file.
+        return 2
+    if args.fix:
+        # After a successful --fix every inserted flag is unresolved by
+        # construction, so the developer still has work to do and the build must
+        # not go green on the strength of the tool having written something.
+        return 1 if (written or unresolved_total or counted) else 0
+    return 1 if (counted or unresolved_total) else 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
