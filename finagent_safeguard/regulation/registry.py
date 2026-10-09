@@ -67,6 +67,11 @@ class Addressee(StrEnum):
     #: enforcing duty on controllers, and six of six judgements found it to be
     #: a permission addressed to Member States. There was no way to say that.
     MEMBER_STATE = "member_state"
+    #: GDPR Art. 44 binds both roles in one sentence -- "complied with by the
+    #: controller and processor" -- and naming only the controller narrowed the
+    #: text. Kept as one member rather than a tuple field because the provision
+    #: imposes a joint condition, not two separable duties.
+    CONTROLLER_AND_PROCESSOR = "controller_and_processor"
     DEPLOYER = "deployer"
     FINANCIAL_ENTITY = "financial_entity"
 
@@ -684,11 +689,15 @@ OBLIGATIONS: tuple[Obligation, ...] = (
     Obligation(provision=GDPR_ART_32, addressee=Addressee.CONTROLLER, enforcing=True),
     Obligation(
         provision=GDPR_ART_44,
-        addressee=Addressee.CONTROLLER,
+        addressee=Addressee.CONTROLLER_AND_PROCESSOR,
         enforcing=True,
         interpretation_boundary=(
             "Calling a model endpoint outside the EEA is a transfer. Whether it rests on "
-            "an adequacy decision or on Art. 46 safeguards is the deployer's assessment."
+            "an adequacy decision or on Art. 46 safeguards is the deployer's assessment. "
+            "Addressee corrected after the first entailment run: the text requires the "
+            "Chapter V conditions to be \"complied with by the controller and processor\", "
+            "and naming the controller alone omitted the processor. An agent framework is "
+            "frequently the processor, so the omitted role was the likelier one here."
         ),
     ),
     Obligation(
@@ -709,7 +718,21 @@ OBLIGATIONS: tuple[Obligation, ...] = (
         ),
     ),
     Obligation(provision=DORA_ART_28_3, addressee=Addressee.FINANCIAL_ENTITY, enforcing=True),
-    Obligation(provision=DORA_ART_23, addressee=Addressee.FINANCIAL_ENTITY, enforcing=True),
+    Obligation(
+        provision=DORA_ART_23,
+        addressee=Addressee.PAYMENT_SERVICE_PROVIDER,
+        enforcing=True,
+        interpretation_boundary=(
+            "Narrowed after the first entailment run. The text does not say \"financial "
+            "entities\": it extends the Chapter's requirements to payment-related "
+            "incidents \"where they concern credit institutions, payment institutions, "
+            "account information service providers, and electronic money institutions\". "
+            "All four are payment service providers under PSD2 Art. 1(1), so that is the "
+            "closest available addressee and it is narrower than the text's own defined "
+            "term \"financial entity\", which would have over-applied this provision to "
+            "every DORA-regulated firm."
+        ),
+    ),
     RiskBasedObligation(
         provision=AMLR_ART_26_1,
         addressee=Addressee.OBLIGED_ENTITY,
@@ -730,7 +753,18 @@ OBLIGATIONS: tuple[Obligation, ...] = (
             "roadmap. Not enforcing: AMLR applies from 10 July 2027."
         ),
     ),
-    Obligation(provision=TFR_ART_4_4, addressee=Addressee.OBLIGED_ENTITY, enforcing=True),
+    Obligation(
+        provision=TFR_ART_4_4,
+        addressee=Addressee.PAYMENT_SERVICE_PROVIDER,
+        enforcing=True,
+        interpretation_boundary=(
+            "Corrected after the first entailment run, where two of three judges "
+            "dissented. The duty falls on \"the payment service provider of the payer\", "
+            "not on an obliged entity generally. A PSP is usually an obliged entity under "
+            "the AMLR, but the converse does not hold, so the generic term applied this "
+            "verification duty to firms the provision does not reach."
+        ),
+    ),
 )
 
 # --------------------------------------------------------------------------
