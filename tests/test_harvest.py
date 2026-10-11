@@ -104,3 +104,78 @@ class TestTheSampleCanActuallyDiscriminate:
         for pointer in _pointers():
             span = int(pointer["last_line"]) - int(pointer["first_line"])
             assert span >= 1, pointer["item_id"]
+
+
+class TestTheTrainingCorpusIsSeparate:
+    """Overlap between the training and evaluation sets is the one mistake that
+    would make every number in the project meaningless, so it is asserted twice
+    -- by identity and by location -- rather than trusted.
+    """
+
+    @staticmethod
+    def _train() -> list[dict[str, object]]:
+        path = ROOT / "benchmark/train-pointers.jsonl"
+        if not path.exists():
+            pytest.skip("training corpus not drawn in this checkout")
+        return [
+            json.loads(line) for line in path.read_text().splitlines() if line.strip()
+        ]
+
+    def test_no_item_id_is_shared(self) -> None:
+        train = {str(p["item_id"]) for p in self._train()}
+        evaluation = {str(p["item_id"]) for p in _pointers()}
+        assert not (train & evaluation)
+
+    def test_no_function_is_shared(self) -> None:
+        """Ids could differ while pointing at the same function. This is the
+        check that actually matters: a classifier tested on a function it was
+        trained on is measuring its own memory."""
+        def where(p: dict[str, object]) -> tuple[str, str, int]:
+            return (str(p["repo"]), str(p["path"]), int(p["first_line"]))
+
+        train = {where(p) for p in self._train()}
+        evaluation = {where(p) for p in _pointers()}
+        shared = train & evaluation
+        assert not shared, f"{len(shared)} function(s) in both sets: {sorted(shared)[:5]}"
+
+    def test_the_training_ids_are_prefixed(self) -> None:
+        """So a row cannot be mistaken for an evaluation row if the two files
+        are ever concatenated by accident -- which is how the first training
+        run came to overwrite the evaluation judgements."""
+        for pointer in self._train():
+            assert str(pointer["item_id"]).startswith("train-"), pointer
+
+    def test_it_is_large_enough_to_train_on(self) -> None:
+        """At roughly 22% positive, a thousand items gives about 220 positives,
+        and at ten events per feature that is the difference between a twenty
+        feature budget and a four feature one."""
+        assert len(self._train()) >= 900
+
+    def test_the_class_balance_matches_the_evaluation_set(self) -> None:
+        """Training on a different distribution from the test set measures the
+        shift rather than the model. The evaluation set is 21.9% positive."""
+        path = ROOT / "benchmark/train-labels.jsonl"
+        if not path.exists():
+            pytest.skip("training labels not generated in this checkout")
+        votes: dict[str, list[bool]] = {}
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row.get("regulated") is None:
+                continue
+            votes.setdefault(str(row["item_id"]), []).append(bool(row["regulated"]))
+        mode = [sum(v) * 2 > len(v) for v in votes.values()]
+        rate = sum(mode) / len(mode)
+        assert 0.15 <= rate <= 0.30, f"training positive rate {rate:.1%}"
+
+    def test_every_training_item_was_labelled(self) -> None:
+        path = ROOT / "benchmark/train-labels.jsonl"
+        if not path.exists():
+            pytest.skip("training labels not generated in this checkout")
+        labelled = {
+            str(json.loads(line)["item_id"])
+            for line in path.read_text().splitlines()
+            if line.strip()
+        }
+        assert {str(p["item_id"]) for p in self._train()} <= labelled

@@ -62,8 +62,10 @@ API_VERSION = "2023-06-01"
 
 RUBRIC = ROOT / "finagent_safeguard/regulation/prompts/labelling_rubric.txt"
 POINTERS = ROOT / "benchmark/pointers.jsonl"
+TRAIN_POINTERS = ROOT / "benchmark/train-pointers.jsonl"
 LABELS = ROOT / "benchmark/labels.jsonl"
 OUT = ROOT / "benchmark/llm-labels.jsonl"
+TRAIN_OUT = ROOT / "benchmark/train-labels.jsonl"
 
 SOURCES = Path(
     "/private/tmp/claude-501/-Users-naomi-Documents-projects-finagent-safeguard-sdk"
@@ -124,12 +126,12 @@ def kappa(pairs: list[tuple[bool, bool]]) -> tuple[float, float]:
 # --------------------------------------------------------------------------
 # data
 # --------------------------------------------------------------------------
-def _items() -> list[dict[str, Any]]:
+def _items(pointer_file: Path | None = None) -> list[dict[str, Any]]:
     import sysconfig
 
     stdlib = Path(sysconfig.get_paths()["stdlib"])
     out: list[dict[str, Any]] = []
-    for line in POINTERS.read_text().splitlines():
+    for line in (pointer_file or POINTERS).read_text().splitlines():
         if not line.strip():
             continue
         p = json.loads(line)
@@ -255,7 +257,16 @@ def _ask(item: dict[str, Any], model: str, run: int) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 # scoring
 # --------------------------------------------------------------------------
-def _score(records: list[dict[str, Any]]) -> int:
+def _score(records: list[dict[str, Any]], *, human_labels: bool = True) -> int:
+    """Score the judgements. ``human_labels=False`` for the training corpus.
+
+    The training items have no human label, so every figure that compares
+    against one is meaningless there. Printing kappa 0.000 and precision 0%
+    would read as a catastrophic result rather than an inapplicable
+    measurement, which is worse than printing nothing.
+    """
+    if not human_labels:
+        return _score_unlabelled(records)
     human = _human()
     by_model: dict[str, dict[str, list[bool]]] = defaultdict(lambda: defaultdict(list))
     for r in records:
@@ -350,24 +361,74 @@ def _score(records: list[dict[str, Any]]) -> int:
     return 0
 
 
+def _score_unlabelled(records: list[dict[str, Any]]) -> int:
+    """What can be said about judgements with no gold standard: how stable they
+    are, and what the class balance came out as."""
+    votes: dict[str, list[bool]] = defaultdict(list)
+    for r in records:
+        if r.get("regulated") is not None:
+            votes[str(r["item_id"])].append(bool(r["regulated"]))
+
+    failures = sum(1 for r in records if r.get("regulated") is None)
+    runs = [v for v in votes.values() if len(v) >= 2]
+    self_k, _ = kappa([(v[0], v[1]) for v in runs])
+    unanimous = [i for i, v in votes.items() if len(set(v)) == 1]
+    mode = {i: sum(v) * 2 > len(v) for i, v in votes.items()}
+    positives = sum(mode.values())
+
+    print(f"items               {len(votes)}   failed judgements {failures}")
+    print(f"self-kappa          {self_k:.3f}  ({band(self_k)})")
+    print(f"unanimous           {len(unanimous)}/{len(votes)}  "
+          f"({len(unanimous) / len(votes):.1%})")
+    print(f"labelled regulated  {positives}  ({positives / len(votes):.1%})")
+    print("\nNo human label exists for these items, so there is nothing to")
+    print("score against. The evaluation set is the only test set.")
+    return 0
+
+
 # --------------------------------------------------------------------------
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--score", action="store_true")
     ap.add_argument("--runs", type=int, default=RUNS)
+    ap.add_argument(
+        "--train",
+        action="store_true",
+        help=(
+            "label benchmark/train-pointers.jsonl instead, with --judges, and "
+            "write benchmark/train-labels.jsonl. There is no human label to "
+            "score against, so only self-consistency is reported."
+        ),
+    )
+    ap.add_argument(
+        "--judges",
+        default=",".join(JUDGES),
+        help="comma-separated models; the training run uses Sonnet alone",
+    )
     args = ap.parse_args(argv)
 
     if args.score:
-        if not OUT.exists():
-            print(f"no judgements at {OUT.relative_to(ROOT)}", file=sys.stderr)
+        source = TRAIN_OUT if args.train else OUT
+        if not source.exists():
+            print(f"no judgements at {source.relative_to(ROOT)}", file=sys.stderr)
             return 1
         return _score(
-            [json.loads(l) for l in OUT.read_text().splitlines() if l.strip()]
+            [json.loads(l) for l in source.read_text().splitlines() if l.strip()],
+            human_labels=not args.train,
         )
 
-    items = _items()
-    if len(items) < 150:
+    judges = tuple(j.strip() for j in str(args.judges).split(",") if j.strip())
+    if unknown := [j for j in judges if j not in PRICES]:
+        print(f"no price recorded for {unknown}", file=sys.stderr)
+        return 2
+
+    if args.train:
+        globals()["JUDGES"] = judges
+        items = _items(TRAIN_POINTERS)
+    else:
+        items = _items()
+    if not args.train and len(items) < 150:
         print(
             f"only resolved {len(items)} items; run tools/harvest_corpus.py --clone",
             file=sys.stderr,
@@ -378,9 +439,9 @@ def main(argv: list[str] | None = None) -> int:
         rubric = len(RUBRIC.read_text()) // 4
         body = sum(len(i["source"][:6000]) for i in items) // 4
         total = Decimal(0)
-        print(f"items {len(items)}   judges {len(JUDGES)}   runs {args.runs}")
-        print(f"calls {len(items) * len(JUDGES) * args.runs}\n")
-        for model in JUDGES:
+        print(f"items {len(items)}   judges {len(judges)}   runs {args.runs}")
+        print(f"calls {len(items) * len(judges) * args.runs}\n")
+        for model in judges:
             pin, pout = PRICES[model]
             tin = (rubric * len(items) + body) * args.runs
             tout = len(items) * args.runs * 60
@@ -397,7 +458,7 @@ def main(argv: list[str] | None = None) -> int:
     work = [
         (item, model, run)
         for item in items
-        for model in JUDGES
+        for model in judges
         for run in range(1, args.runs + 1)
     ]
     print(f"{len(work)} calls\n")
@@ -410,7 +471,13 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {n}/{len(work)}")
 
     records.sort(key=lambda r: (str(r["item_id"]), str(r["model"]), int(r["run"])))
-    OUT.write_text(
+    # TRAIN_OUT existed and was never used, so the first training run wrote
+    # 2,988 training judgements over the 1,440 evaluation ones. They were
+    # recoverable only because the evaluation file had already been committed.
+    # Declaring a destination and not using it is the same defect class as a
+    # mutation row written under a duplicate key: present, plausible, inert.
+    destination = TRAIN_OUT if args.train else OUT
+    destination.write_text(
         "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records)
     )
     spend: Counter[str] = Counter()
@@ -422,9 +489,9 @@ def main(argv: list[str] | None = None) -> int:
          + Decimal(spend[m + ":out"]) * PRICES[m][1]) / Decimal(1_000_000)
         for m in JUDGES
     )
-    print(f"\nwritten to {OUT.relative_to(ROOT)}")
+    print(f"\nwritten to {destination.relative_to(ROOT)}")
     print(f"actual cost ~${actual:.2f} (Haiku rate unverified)\n")
-    return _score(records)
+    return _score(records, human_labels=not args.train)
 
 
 if __name__ == "__main__":
