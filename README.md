@@ -390,11 +390,47 @@ it claims to solve.
   layer, not a shipped one.
 - **`--check` does not detect a changed claim**, only a changed rubric or corpus.
 
-## Next
+## Next: the obligation engine
 
-- The obligation layer: category → the duties it attracts → a runtime check.
-  The `Obligation` dataclass exists for this and is deliberately unpopulated;
-  every instance needs the same provenance a `Provision` has.
+A confirmed category currently opens the build. The layer this is a foundation
+for is **different doors for different categories** — the measures you apply
+depend on what the function touches.
+
+```
+category                      →  the door it should open
+PSD2_PAYMENT_EXECUTION        →  require strong customer authentication
+GDPR_PII_PROCESSING           →  minimise fields; log the lawful basis
+GDPR_THIRD_COUNTRY_TRANSFER   →  check the transfer mechanism before egress
+AML_TRANSACTION_MONITORING    →  screen, and keep the record
+DORA_ICT_THIRD_PARTY          →  register the dependency; test exit
+```
+
+So: **category → live duties → runtime check.** `Obligation` is the groundwork,
+and carries exactly the fields that layer needs — `addressee` (a duty binds a
+legal person, and the SDK is not one), `enforcing` (whether it is live *today*,
+which no reading of the text reveals), and `interpretation_boundary` (where our
+reading stops and a lawyer's begins). It is tested and has **zero instances**,
+because an obligation asserted without the provenance machinery underneath
+would reproduce this project's founding error in a tidier wrapper.
+
+**Where the seam is, stated honestly.** `@regulated_tool` does not wrap — it
+records the classification and returns the function untouched, which is what
+makes stacking order-independent and keeps signatures intact. That means there
+is **no interception hook today**, so runtime doors need a decision rather than
+just more code:
+
+- *wrap the function* — gives up signature preservation, identity, and
+  order-independent stacking;
+- *dispatch at the agent* — consult a tool's categories before invoking it,
+  leaving the decorator clean.
+
+The second is the better answer, and `agent.categories` already exists as the
+place it would hang off. Naming that seam is part of the groundwork; discovering
+it later would not be.
+
+### Also next
+
+- More repositories in the corpus.
 - More repositories in the corpus. At three scoreable folds, more
   repositories are worth more than more features — one result in sixteen is
   already spurious by chance.
