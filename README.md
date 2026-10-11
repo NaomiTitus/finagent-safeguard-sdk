@@ -324,8 +324,8 @@ The part that is actually reusable, independent of the regulatory domain.
 
 | | |
 |---|---|
-| **423 tests** | including an adversarial bypass suite |
-| **84 mutation rows** | each one a single edit, each naming the test that must fail — `docs/mutation-list.md` |
+| **441 tests** | including an adversarial bypass suite |
+| **93 mutation rows** | each one a single edit naming the test that must fail — `tools/run_mutations.py`, with 57 written up in `docs/mutation-list.md` |
 | **`mypy --strict`** | clean across 28 source files |
 | **5 CI jobs** | 4 required on `main` |
 

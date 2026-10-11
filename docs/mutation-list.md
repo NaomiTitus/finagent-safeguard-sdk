@@ -10,6 +10,19 @@ row here is itself a review finding.
 `unrun` (listed, not yet applied). Always revert after applying; confirm with
 `git diff --quiet`.
 
+**This file is the annotated subset, not the list.** The executable list is
+`MUTATIONS` in `tools/run_mutations.py` — 93 rows, every one carrying its own
+note and the name of the test that must fail, and `BASELINE` in the same file is
+what CI enforces. 57 of those rows are written up here, chosen because they
+carry a lesson worth more than the row: a guard that turned out to be dead
+code, a test whose tolerance was wider than the effect it named, a feature that
+fired backwards. The 36 not here — most of the `L` series, covering the
+linter's write path — are no less enforced; they are just not more interesting
+than their own note.
+
+A discrepancy between this file and `BASELINE` is a defect in this file.
+`BASELINE` is executed on every push; prose is not.
+
 ---
 
 ## `regulation/ingest.py`
@@ -53,7 +66,7 @@ row here is itself a review finding.
 | R10 | `ReferencePoint.governs` becomes `""` | `test_reference_point_requires_governs` | unrun |
 | R11 | Point both EUR 10 000 reference points at the same article | `test_the_two_amlr_ten_thousands_are_distinct_entries` | unrun |
 | R13 | Cite a paragraph or point that does not exist (Art. 5(9)(z)) | `test_every_cited_paragraph_exists_in_the_span` | caught |
-| R12 | `provisions()` returns an empty iterator | 4 tests incl. both quotation tests | caught |
+| R12 | `provisions()` returns an empty iterator, so every check that iterates the registry passes by having nothing to check | `test_nothing_is_cited_that_is_not_pinned` | caught |
 
 ## `core/decorators.py`
 
@@ -70,19 +83,33 @@ row here is itself a review finding.
 
 | # | Mutation | Expected killer | Status |
 |---|---|---|---|
-| A1 | Report only the first unclassified tool | `test_partial_registration_still_fails` | unrun |
+| **A1** | **Report only the first unclassified tool** | `test_partial_registration_still_fails` — named, but does not fail | **NOT CAUGHT** |
 | A2 | `UnregulatedToolError` subclasses `ImportError` | `test_error_is_not_import_error` | unrun |
 | A3 | Drop the remedy from the error message | `test_error_names_the_remedy` | unrun |
 | A4 | Swallow lookup exceptions and treat as classified | `test_fails_closed_when_registry_unavailable` | unrun |
 | **A5** | **Bind enforcement to the class as `_require_classification`, then override it in a subclass** | **none — see F-002** | **NOT CAUGHT** |
+
+The rows below carry a **B** prefix because they are *documented holes rather
+than executable mutations*: a subclass that never calls `super()`, or an
+`object.__new__` that skips `__init__`, is not a textual edit anything can
+apply, so none has a killer test by construction. The prefix exists because two
+of them were originally numbered in the A-series and those numbers were later
+reused for real executable rows — the same identifier meaning a verified hole
+in one file and a caught mutation in another.
+
+Every one of these is a bypass of the runtime gate by someone *trying* to get
+around it. That is outside this tool's threat model, which is **error, not
+adversary**: a linter helps a developer who wants to get it right. Listed
+anyway, because a gap you can name is a different thing from one you have not
+noticed.
 | A3b | Remove only the prose lead-in from the error message | none — decided acceptable | NOT CAUGHT (closed) |
-| **A6** | **Subclass overrides `__init__` and never calls `super()`** | **none — see F-004** | **NOT CAUGHT** |
-| **A7** | **`object.__new__(BaseCompliantAgent)` + attribute assignment (also `pickle`, `copy`)** | **none — see F-004** | **NOT CAUGHT** |
-| **A8** | **Classify a stub, then rebind the module name to an unclassified function** | **none — see F-005** | **NOT CAUGHT** |
-| **A9** | **Set `__qualname__` on an unclassified function to one already classified** | **none — see F-005** | **NOT CAUGHT** |
-| **A10** | **Pass a callable object or `functools.partial`** | **none — raises AttributeError, see F-006** | **NOT CAUGHT** |
-| **A11** | **Replace `TOOL_REGISTRY` with a dict whose `get` always answers** | **none — see F-007** | **NOT CAUGHT** |
-| **A12** | **Reassign `agent.tools` after construction** | **none — see F-008** | **NOT CAUGHT** |
+| **B1** | **Subclass overrides `__init__` and never calls `super()`** | **none — see F-004** | **NOT CAUGHT** |
+| **B2** | **`object.__new__(BaseCompliantAgent)` + attribute assignment (also `pickle`, `copy`)** | **none — see F-004** | **NOT CAUGHT** |
+| **B3** | **Classify a stub, then rebind the module name to an unclassified function** | **none — see F-005** | **NOT CAUGHT** |
+| **B4** | **Set `__qualname__` on an unclassified function to one already classified** | **none — see F-005** | **NOT CAUGHT** |
+| **B5** | **Pass a callable object or `functools.partial`** | **none — raises AttributeError, see F-006** | **NOT CAUGHT** |
+| **B6** | **Replace `TOOL_REGISTRY` with a dict whose `get` always answers** | **none — see F-007** | **NOT CAUGHT** |
+| **B7** | **Reassign `agent.tools` after construction** | **none — see F-008** | **NOT CAUGHT** |
 
 ## `cli/linter.py` — the approval guard
 
