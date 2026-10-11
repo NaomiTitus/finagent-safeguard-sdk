@@ -53,6 +53,30 @@ WORKSHEET = OUT / "worksheet.md"
 #: Fixed so the draw is reproducible by anyone re-running this.
 SEED = 20261009
 
+#: A different seed for the training draw, so the two samples are independent
+#: rather than the second being a prefix of the first.
+TRAIN_SEED = 20261011
+
+#: Training-set draw, sized for the feature budget rather than for balance.
+#:
+#: At roughly 22% positive, a thousand items yields about 220 positives, and at
+#: the usual ten events per feature that lifts the budget from four features to
+#: twenty -- the difference between a model that can learn something and one
+#: that can only confirm the word lists.
+#:
+#: python-sepaxml and pyiso20022 are taken whole. They are the densest sources
+#: of positives (80% and 12% in the evaluation set) and between them hold under
+#: two hundred functions, so drawing proportionally would waste them. Everything
+#: else is sampled, and the standard library supplies negatives.
+TRAIN_DRAW: dict[str, int] = {
+    "python-sepaxml": 200,
+    "pyiso20022": 200,
+    "schwifty": 150,
+    "stripe-python": 300,
+    "django-oscar": 250,
+    "cpython-stdlib": 150,
+}
+
 #: Repository, clone URL, licence as verified by reading the file, and how many
 #: functions to draw. Counts are weighted towards the payment libraries because
 #: the standard library would otherwise swamp the sample -- it is the negative
@@ -171,8 +195,18 @@ def _functions(path: Path) -> list[tuple[str, int, int, str]]:
     return out
 
 
-def _sample() -> list[Pointer]:
-    rng = random.Random(SEED)
+def _sample(
+    *, train: bool = False, exclude: set[tuple[str, str, int]] | None = None
+) -> list[Pointer]:
+    """Draw the sample. ``train`` switches to the larger, independent draw.
+
+    ``exclude`` holds (repo, path, first_line) triples already drawn, so the
+    training set cannot overlap the evaluation set. Overlap would mean testing
+    on items the model was trained on, which is the one mistake that would make
+    every number meaningless.
+    """
+    rng = random.Random(TRAIN_SEED if train else SEED)
+    excluded = exclude or set()
     pointers: list[Pointer] = []
 
     for source in SOURCE_LIST:
@@ -188,18 +222,19 @@ def _sample() -> list[Pointer]:
                     continue
                 found.append((path, name, first, last, segment))
 
+        found = [
+            f for f in found
+            if (source.name, _relative(f[0], SOURCES / source.name, source), f[2])
+            not in excluded
+        ]
         rng.shuffle(found)
-        for index, (path, name, first, last, segment) in enumerate(
-            found[: source.draw]
-        ):
-            relative = (
-                str(path.relative_to(repo))
-                if source.url
-                else path.name
-            )
+        draw = TRAIN_DRAW.get(source.name, 0) if train else source.draw
+        prefix = "train-" if train else ""
+        for index, (path, name, first, last, segment) in enumerate(found[:draw]):
+            relative = _relative(path, repo, source)
             pointers.append(
                 Pointer(
-                    item_id=f"{source.name}:{index:03d}",
+                    item_id=f"{prefix}{source.name}:{index:04d}",
                     repo=source.name,
                     commit=commit[:12],
                     path=relative,
@@ -210,6 +245,10 @@ def _sample() -> list[Pointer]:
                 )
             )
     return pointers
+
+
+def _relative(path: Path, repo: Path, source: Source) -> str:
+    return str(path.relative_to(repo)) if source.url else path.name
 
 
 def _worksheet(pointers: list[Pointer]) -> str:
@@ -280,6 +319,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--worksheet", action="store_true", help="regenerate the worksheet only"
     )
+    parser.add_argument(
+        "--train",
+        action="store_true",
+        help="draw the larger training sample, excluding the evaluation items",
+    )
     args = parser.parse_args(argv)
 
     if args.clone:
@@ -293,6 +337,34 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     OUT.mkdir(exist_ok=True)
+
+    if args.train:
+        if not POINTERS.exists():
+            print("draw the evaluation set first", file=sys.stderr)
+            return 2
+        held = {
+            (str(r["repo"]), str(r["path"]), int(r["first_line"]))
+            for r in (
+                json.loads(line)
+                for line in POINTERS.read_text().splitlines()
+                if line.strip()
+            )
+        }
+        pointers = _sample(train=True, exclude=held)
+        target = ROOT / "benchmark/train-pointers.jsonl"
+        target.write_text(
+            "".join(json.dumps(asdict(p)) + "\n" for p in pointers)
+        )
+        print(f"  wrote {len(pointers)} training pointers to {target.relative_to(ROOT)}")
+        from collections import Counter
+
+        for repo, count in Counter(p.repo for p in pointers).most_common():
+            print(f"    {repo:<18} {count}")
+        drawn = {(p.repo, p.path, p.first_line) for p in pointers}
+        overlap = drawn & held
+        print(f"\n  overlap with the evaluation set: {len(overlap)}")
+        return 1 if overlap else 0
+
     if args.worksheet and POINTERS.exists():
         pointers = [
             Pointer(**json.loads(line))
