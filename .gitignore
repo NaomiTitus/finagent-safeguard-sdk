@@ -16,3 +16,6 @@ venv/
 
 # Labelling worksheet: holds third-party source, regenerated from pointers
 benchmark/worksheet.md
+
+# Labelling app build: inlines third-party source, regenerated from pointers
+benchmark/.app/
