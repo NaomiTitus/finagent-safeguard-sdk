@@ -363,6 +363,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="leave-one-repository-out, against the repo-prior baseline")
     ap.add_argument("--loro-ablate", action="store_true",
                     help="drop each feature group and re-measure under LORO")
+    ap.add_argument("--loro-per-feature", action="store_true",
+                    help="drop each individual feature and re-measure under LORO")
     args = ap.parse_args(argv)
 
     train_x, train_y, train_ids = _rows(
@@ -381,7 +383,7 @@ def main(argv: list[str] | None = None) -> int:
 
     repos = [_repo_of(i) for i in train_ids]
 
-    if args.loro or args.loro_ablate:
+    if args.loro or args.loro_ablate or args.loro_per_feature:
         print("\n" + "=" * 70)
         print("LEAVE-ONE-REPOSITORY-OUT")
         print("The split the stratified cross-validation could not do. Both corpora")
@@ -429,7 +431,37 @@ def main(argv: list[str] | None = None) -> int:
                 f"   {verdict}{note}"
             )
 
-    if args.cv or not (args.ablate or args.final or args.loro or args.loro_ablate):
+    if args.loro_per_feature:
+        base_auc = _macro(loro_full, "auc")
+        print(f"\nLORO per-feature -- each feature dropped in turn (full {base_auc:.3f})")
+        print("  A group can earn its place on one member while carrying others")
+        print("  that do nothing. This is the only view that separates them.")
+        print("  Read with the caveat: one arm per feature against 3 scoreable")
+        print("  folds is a multiple-comparison problem, and contribution here is")
+        print("  *marginal* -- two features carrying the same signal each measure")
+        print("  near zero because removing either leaves the signal intact.")
+        print("  " + "-" * 62)
+        measured: list[tuple[float, str, float]] = []
+        for name in MODEL_FEATURES:
+            kept = tuple(n for n in MODEL_FEATURES if n != name)
+            score = _macro(leave_one_repo_out(train_x, train_y, repos, kept), "auc")
+            measured.append((base_auc - score, name, score))
+        for contribution, name, score in sorted(measured, reverse=True):
+            if contribution > 0.01:
+                verdict = "earns it"
+            elif contribution < -0.001:
+                verdict = "HARMFUL"
+            else:
+                verdict = "no measurable gain"
+            print(f"  without {name:<22} AUC {score:.3f}   "
+                  f"delta {contribution:+.3f}   {verdict}")
+        for name in EXCLUDED_FEATURES:
+            print(f"  without {name:<22} not fitted -- see EXCLUDED_FEATURES")
+
+    if args.cv or not (
+        args.ablate or args.final or args.loro or args.loro_ablate
+        or args.loro_per_feature
+    ):
         _report_cv(_cross_validate(train_x, train_y, MODEL_FEATURES), "cross-validated")
 
     if args.ablate:

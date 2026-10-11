@@ -275,7 +275,22 @@ EXCLUDED_GROUPS: Final[tuple[str, ...]] = ("literal",)
 #: tight and the collinearity is independent evidence, but this is a selection
 #: made on three repositories -- the same shape as the mistake LORO exists to
 #: catch. Revisit when more repositories are scoreable.
-EXCLUDED_FEATURES: Final[tuple[str, ...]] = ("pii_hits",)
+#: `risky_annotation` is the one feature measured as actively **harmful**:
+#: removing it moves LORO macro AUC from 0.793 to **0.798** (contribution
+#: -0.005, 95% CI [-0.013, +0.000], P(no gain from dropping) 0.03).
+#:
+#: The mechanism is not subtle. It fires on **one row in 996**, and the fit
+#: gives that single observation a weight of **-5.875** -- the largest
+#: magnitude in the model, estimated from one example. A coefficient fitted to
+#: a single row cannot transfer to a repository that row is not in.
+#:
+#: Independent evidence agrees, which is why this one is acted on rather than
+#: merely flagged: only 2 678 of 70 826 public Python repositories carry PEP 484
+#: annotations at all (Rak-amnouykit et al., DLS 2020). Whether a function is
+#: annotated is a fact about its project's conventions, not about what it does
+#: with money or personal data -- so the feature was always measuring the wrong
+#: noun.
+EXCLUDED_FEATURES: Final[tuple[str, ...]] = ("pii_hits", "risky_annotation")
 
 #: The features the model is fitted on. `extract` returns a superset, so a
 #: scored row always has every name this tuple asks for. Both exclusions stay

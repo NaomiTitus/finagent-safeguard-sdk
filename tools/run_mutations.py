@@ -636,12 +636,25 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
     ),
     "F21": (
         FEAT,
-        'EXCLUDED_FEATURES: Final[tuple[str, ...]] = ("pii_hits",)',
-        "EXCLUDED_FEATURES: Final[tuple[str, ...]] = ()",
+        'FEATURES: Final[tuple[str, ...]] = ("pii_hits"',
+        'FEATURES: Final[tuple[str, ...]] = (""',
         "test_the_redundant_signature_feature_is_not_fitted",
         "refit pii_hits alongside both_vocabularies, which is derived from it. "
         "Worth -0.019 LORO AUC: L2 splits one feature's credit across two "
         "expressions of the same scan",
+    ),
+    "F23": (
+        FEAT,
+        # Anchored on this row's own element only. Anchoring on the whole
+        # tuple made F21 and F23 break each other: adding a second exclusion
+        # invalidated the first row's anchor, which reads as a stale baseline
+        # rather than as a finding.
+        ', "risky_annotation")',
+        ")",
+        "test_the_harmful_annotation_feature_is_not_fitted",
+        "refit risky_annotation, the one feature measured as actively harmful: "
+        "it fires on one row in 996 and takes a weight of -5.875, the largest "
+        "magnitude in the model, estimated from a single observation",
     ),
     "F22": (
         FEAT,
@@ -818,6 +831,7 @@ BASELINE: dict[str, str] = {
     "M7": "caught",
     "F21": "caught",
     "F22": "caught",
+    "F23": "caught",
 }
 
 
