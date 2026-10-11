@@ -87,7 +87,8 @@ positives to fit. So this was tried first, and the embedding only after
 | original 16 | 0.576 | +0.108 |
 | 16 minus `literal` (12) | 0.645 | +0.059 |
 | 17 — minus `literal`, plus `dataflow` and `docstring` | 0.774 | +0.165 |
-| **16 — also minus `pii_hits`** | **0.793** | **+0.152** |
+| 16 — also minus `pii_hits` | 0.793 | +0.152 |
+| **15 — also minus `risky_annotation`** | **0.798** | **+0.152** |
 
 Per fold, for the shipped 17:
 
@@ -123,11 +124,11 @@ from the full 0.774:
 
 Two rows deserve comment rather than a nod.
 
-**`dataflow` at +0.092 is larger than every pre-existing group combined.** The
-brief that produced it — *a feature that predicts via length does not address
-whether the function handles money or PII* — was right, and specifically right:
-the group that asks what the function reads carries more transferable signal
-than the five groups that describe how it is written.
+**`dataflow` at +0.092 is larger than every pre-existing group combined** — but
+see the per-feature correction below for *which member* earns it. The brief that
+produced the group — *a feature that predicts via length does not address
+whether the function handles money or PII* — was right. The specific story
+first told about *why* was not.
 
 **`vocabulary` has gone negative, and it was +0.024 before.** Removing it now
 *improves* the model. The honest reading is that `callee_vocabulary` covers the
@@ -209,6 +210,125 @@ same shape as the mistake leave-one-repository-out exists to catch. It is
 flagged in `EXCLUDED_FEATURES` as provisional, to revisit when more
 repositories are scoreable.
 
+### Per-feature, and a correction: `callee_vocabulary` is the engine
+
+A group can earn its place on the strength of one member while carrying others
+that do nothing, and group-level ablation cannot see the difference.
+`python3 tools/train_classifier.py --loro-per-feature` can.
+
+The table below was measured on the **16-feature** set, with a paired bootstrap
+per arm. The shipped tool now reports against the **15-feature** set and prints
+point estimates rather than intervals, so its numbers differ — see *Marginal
+contribution is not stable* below, which is the more important finding.
+
+| Feature | Group | Contribution | 95% CI | |
+|---|---|---:|---|---|
+| `callee_vocabulary` | dataflow | **+0.099** | [+0.064, +0.138] | earns it |
+| `private` | structure | +0.035 | [+0.009, +0.063] | earns it |
+| `sink_call` | sink | +0.033 | [+0.009, +0.059] | earns it |
+| `query_verb` | verb | +0.027 | [+0.006, +0.051] | earns it |
+| `docstring_intent` | docstring | +0.026 | [−0.008, +0.059] | ambiguous |
+| `mocked` | sink | +0.017 | [+0.000, +0.034] | earns it |
+| `docstring_disclaims` | docstring | +0.015 | [+0.001, +0.030] | earns it |
+| `param_count` | structure | +0.013 | [+0.002, +0.025] | earns it |
+| `action_verb` | verb | +0.009 | [−0.016, +0.033] | — |
+| **`sensitive_subscripts`** | dataflow | **+0.007** | [−0.002, +0.018] | — |
+| `check_verb` | verb | +0.006 | [−0.025, +0.036] | — |
+| `subscript_total` | dataflow | +0.004 | [−0.001, +0.010] | — |
+| `both_vocabularies` | vocabulary | +0.001 | [−0.003, +0.006] | — |
+| `money_hits` | vocabulary | +0.001 | [−0.002, +0.003] | — |
+| `no_params` | structure | +0.000 | [−0.000, +0.001] | dead weight |
+| **`risky_annotation`** | structure | **−0.005** | [−0.013, +0.000] | **harmful** |
+
+#### The correction
+
+An earlier version of this document credited the `dataflow` group's +0.092 to
+`sensitive_subscripts`, on the strength of its separating the canonical hard
+pair. **That was two claims conflated into one, and only the first survives.**
+
+- `sensitive_subscripts` **does** separate `_create_header` from
+  `_create_PmtInf_node`. That is a real, tested property of the feature.
+- It does **not** drive the group's contribution. `callee_vocabulary` does,
+  very nearly alone.
+
+Separating one hand-picked pair and contributing across 996 functions are
+different things, and the first does not imply the second.
+
+The obvious objection is masking: marginal contribution is measured *given all
+the other features*, so two features carrying one signal each measure near zero.
+Tested, and rejected:
+
+| | |
+|---|---:|
+| Correlation between the two | **−0.033** |
+| Rows where both fire | **4** of 996 |
+| Removing `callee_vocabulary` alone | +0.099 |
+| Removing **both together** | **+0.099** |
+
+Removing the pair costs exactly what removing `callee_vocabulary` alone costs.
+They are independent, and one of them carries the group. So the single most
+valuable feature in the model is **"does this function call something whose
+name is money or person vocabulary"** — +0.099 of the model's +0.298 over
+baseline.
+
+#### Why only one feature was dropped on this table
+
+| Removed | AUC | |
+|---|---:|---|
+| `risky_annotation` | **0.798** | helps — acted on |
+| `risky_annotation` + `no_params` | 0.790 | *hurts* — the sign flips |
+| the five features at or below +0.001, together | 0.785 | **hurts** |
+
+That last row is the guard against over-reading the table. Five features each
+measuring about +0.001 individually are worth **+0.009 together**: their
+contributions are masked pairwise but real in aggregate. Bulk-dropping on
+marginal contribution would have cost measurable performance.
+
+So `risky_annotation` is dropped and nothing else is, because it is the only
+case where three independent lines of evidence agree — the measurement
+(−0.005), the mechanism (a weight of −5.875 fitted to **one row in 996**), and
+the prior literature (2 678 of 70 826 public Python repositories carry PEP 484
+annotations, Rak-amnouykit DLS 2020, so annotation presence is a fact about a
+project's conventions). Everything else is recorded here and left in the model.
+
+**The standing caveat applies to this whole table**: sixteen arms against three
+scoreable folds is a multiple-comparison problem, where roughly one result in
+sixteen will look significant by chance.
+
+#### Marginal contribution is not stable
+
+Re-measuring after `risky_annotation` was dropped, on the 15-feature set:
+
+| Feature | on 16 features | on 15 features |
+|---|---:|---:|
+| `callee_vocabulary` | +0.099 | **+0.104** |
+| `private` | +0.035 | +0.040 |
+| `sink_call` | +0.033 | +0.036 |
+| `docstring_intent` | +0.026 | +0.030 |
+| `check_verb` | +0.006 | +0.011 |
+| `sensitive_subscripts` | +0.007 | +0.010 |
+| **`no_params`** | **+0.000** | **+0.008** |
+
+`no_params` went from *exactly zero* to +0.008 purely because another feature
+left the model. Nothing about `no_params` changed.
+
+This is the central limitation of per-feature ablation, and it is a property of
+the method rather than a defect in this corpus: a feature's **marginal**
+contribution is "what it adds given everything else", so it moves whenever
+"everything else" moves. Three consequences, all of which this project now
+follows:
+
+1. **A single number from this table is not a property of the feature.** Only
+   `callee_vocabulary` is large enough to be stable across both measurements,
+   and it is the only feature whose dominance is claimed anywhere.
+2. **Dropping several features at once cannot be justified by their individual
+   rows** — measured directly above: the five features at or below +0.001
+   were worth +0.009 *together*.
+3. **An exclusion needs a mechanism, not just a number.** Both features
+   actually excluded have one: `pii_hits` is collinear with a feature derived
+   from it, `risky_annotation` carries the model's largest weight fitted from a
+   single row. Nothing was excluded on a measurement alone.
+
 ### The canonical hard pair, separated on two independent signals
 
 These two functions are the whole difficulty of the labelling task. Both build
@@ -236,7 +356,7 @@ Measured, not guessed:
 | `docstring_intent_score` | **Shipped** as `docstring_intent` / `docstring_disclaims`. |
 | `callee_vocabulary` | **Shipped**, but in the generic form only. A call-graph edge to a named library method would have been repository identity. |
 | `module_path_depth_risk` | **Rejected without measuring.** The depth and name of a file's path is a property of the repository, not of the function. It is the confounder this exercise removed, re-entered under a new name. |
-| `type_annotation_risk` | **Kept, but as a known weak feature.** Only 2 678 of 70 826 public Python repositories carry PEP 484 annotations (Rak-amnouykit, DLS 2020), so whether a function is annotated says more about its project's conventions than about what it does. |
+| `type_annotation_risk` | **Tried as `risky_annotation`, measured harmful, now excluded.** The prediction held: only 2 678 of 70 826 public Python repositories carry PEP 484 annotations (Rak-amnouykit, DLS 2020), so whether a function is annotated says more about its project's conventions than about what it does. It fired on one row in 996 and took the largest weight in the model. |
 
 ---
 

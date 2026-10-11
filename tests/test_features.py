@@ -197,6 +197,18 @@ class TestTheFittedSet:
         assert "pii_hits" in FEATURE_NAMES
         assert "pii_hits" in _one("def f(email):\n    pass\n")
 
+    def test_the_harmful_annotation_feature_is_not_fitted(self) -> None:
+        """`risky_annotation` is the only feature measured as actively harmful.
+
+        It fires on **one row in 996** and the fit hands that single observation
+        a weight of -5.875, the largest magnitude in the model. Removing it
+        moves LORO macro AUC 0.793 -> 0.798. Independent evidence agrees: only
+        2 678 of 70 826 public Python repositories carry PEP 484 annotations
+        (Rak-amnouykit, DLS 2020), so the feature measures a project's
+        conventions rather than what a function does.
+        """
+        assert "risky_annotation" not in MODEL_FEATURES
+
     def test_the_feature_exclusion_is_declared_rather_than_implied(self) -> None:
         for name in EXCLUDED_FEATURES:
             assert name in FEATURE_NAMES, name

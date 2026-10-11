@@ -108,7 +108,15 @@ Three of six repositories have ≥10 held-out positives and are scoreable.
 | jina-v2-base-code | SVD → 16, *no hand features* | 16 | 0.695 | −0.079 |
 | jina-v2-base-code | similarity | 3 | 0.817 | +0.043 |
 | jina-v2-base-code | similarity, *no hand features* | 3 | 0.635 | −0.139 |
-| TF-IDF subtokens | SVD → 16, per fold | 16 | 0.791 | +0.017 |
+| TF-IDF subtokens | SVD → 16, per fold | 16 | 0.791 | +0.017 \* |
+
+\* **Superseded.** That +0.017 is measured against the 17-feature baseline of
+0.774 that existed when this experiment ran. Two features have since been
+dropped on measured evidence (`pii_hits`, then `risky_annotation`), moving the
+baseline to **0.798**. Re-measured against it, TF-IDF's contribution is
+**−0.002** — it now adds nothing at all. Dropping `pii_hits` closed precisely
+the gap TF-IDF had been filling, which is independent support for that drop.
+The 0.791 figure itself is unchanged and verified; only the delta moved.
 
 Three things in that table are worth more than the headline:
 
@@ -226,6 +234,33 @@ instead of three.
 - **A larger positive count.** At 213 positives, 16 dimensions is already
   13 events per variable. Nothing richer than that is measurable here, whatever
   the encoder.
+
+## The 0.791 figure, verified four ways
+
+A correction deserves the scrutiny it gave. The figure that replaced the
+inflated 0.821 was itself checked:
+
+| Check | Method | Result |
+|---|---|---|
+| The AUC implementation | hand-rolled `_auc` vs sklearn's `roc_auc_score`, on real fold output | **agree** to 1.1 × 10⁻¹⁶ |
+| The fit | hand-rolled gradient descent vs sklearn `LogisticRegression` at `C = 1/l2` | **0.7934 vs 0.7934** |
+| Determinism | two runs, same input | **identical** to nine decimals |
+| Convergence | the headline at 250 → 200 000 gradient steps | **flat at 0.7934** from 1 000 steps on |
+
+Two notes on how that went, because both were my errors rather than the code's.
+
+**The first sklearn comparison disagreed by 0.013**, and I read it as evidence
+the shipped fit was under-converged. It was not: the conversion from `l2` to
+sklearn's `C` was wrong. For the objective
+`mean(loss) + l2/(2n)·‖w‖²` the equivalent is `C = 1/l2`, not `C = n/l2`.
+I had handed sklearn a model with effectively no regularisation and then
+treated its worse generalisation as a defect in mine. Matched properly, the two
+implementations agree exactly.
+
+**The convergence sweep settles the related worry.** The headline does not move
+between 1 000 and 200 000 steps, so the shipped 4 000 is not doing undeclared
+regularisation by stopping early. 250 steps is marginally higher (0.7946),
+which is early stopping, and is why the step count is fixed rather than tuned.
 
 ## Reproducing
 
