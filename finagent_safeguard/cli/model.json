@@ -1,0 +1,48 @@
+{
+  "feature_names": [
+    "money_hits",
+    "pii_hits",
+    "both_vocabularies",
+    "action_verb",
+    "query_verb",
+    "check_verb",
+    "sink_call",
+    "mocked",
+    "param_count",
+    "no_params",
+    "risky_annotation",
+    "private",
+    "party_key",
+    "placeholder",
+    "body_lines",
+    "string_literals"
+  ],
+  "intercept": -2.5569159339525442,
+  "provenance": {
+    "human_ceiling_kappa": "0.762",
+    "labelled_by": "claude-sonnet-5, mode of 3 runs",
+    "positives": "213",
+    "rows": "996",
+    "teacher_kappa": "0.805",
+    "tested_on": "benchmark/labels.jsonl (human, sealed)",
+    "trained_on": "benchmark/train-labels.jsonl"
+  },
+  "weights": {
+    "action_verb": 1.4359251062817069,
+    "body_lines": -1.5042839355621689,
+    "both_vocabularies": 1.4221833591622428,
+    "check_verb": -1.332606681479108,
+    "mocked": -2.549723454164201,
+    "money_hits": 0.8482107057447003,
+    "no_params": -0.5238919761643104,
+    "param_count": 0.1784401025652842,
+    "party_key": 0.8680564447995206,
+    "pii_hits": 1.856393932928673,
+    "placeholder": -0.6521543455224696,
+    "private": -1.4285326094721011,
+    "query_verb": 0.7034601872122113,
+    "risky_annotation": -3.571193744634857,
+    "sink_call": 1.0534200218606706,
+    "string_literals": 4.3978412041102155
+  }
+}
