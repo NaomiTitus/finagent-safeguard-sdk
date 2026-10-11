@@ -91,6 +91,35 @@ function setStatus(text, state) {
   boot.dataset.state = state;
 }
 
+/* Say something a person can act on.
+ *
+ * The first version printed `${err}`, and when this page shipped broken that
+ * rendered as the literal text "[object Object]" -- emscripten's ErrnoError
+ * carries `name` and `errno` and no `message`, so String() finds nothing to
+ * say. A visitor saw a failure with no information in it, which is worse than
+ * a raw stack: it looks like a considered message and carries none.
+ */
+function describeError(err) {
+  if (!err) return '  (no error object)';
+  const parts = [];
+  if (err.name) parts.push(String(err.name));
+  if (err.message) parts.push(String(err.message));
+  if (err.errno !== undefined) parts.push(`errno ${err.errno}`);
+  // Nothing recognisable: fall back to JSON, which at least shows the shape.
+  if (!parts.length) {
+    try {
+      parts.push(JSON.stringify(err));
+    } catch {
+      parts.push(String(err));
+    }
+  }
+  const lines = [`  ${parts.join(' — ')}`];
+  if (err.stack && !/no stack/.test(err.stack)) {
+    lines.push('', ...String(err.stack).split('\n').slice(0, 4).map((l) => `  ${l}`));
+  }
+  return lines.join('\n');
+}
+
 /* ---------------------------------------------------------------- examples */
 EXAMPLES.forEach((ex, i) => {
   const b = document.createElement('button');
@@ -118,14 +147,22 @@ async function init() {
 
     setStatus('loading the linter…', 'loading');
     const bundle = await (await fetch('demo-bundle.json')).json();
-    // Written into the virtual filesystem under the package's real layout, so
-    // the imports in the source resolve exactly as they do on disk.
+
+    // Absolute paths, and an explicit root on sys.path.
+    //
+    // The first version wrote the bundle to relative paths and put "" on
+    // sys.path. It failed with ErrnoError 44 (ENOENT) before any Python ran:
+    // emscripten's FS does not resolve a relative path the way the shell does,
+    // so mkdirTree('finagent_safeguard/cli') had nothing to hang from. The
+    // page loaded, showed "loading the linter…", and stopped there.
+    const ROOT = '/pkg';
+    pyodide.FS.mkdirTree(ROOT);
     for (const [path, text] of Object.entries(bundle)) {
-      const dir = path.slice(0, path.lastIndexOf('/'));
-      pyodide.FS.mkdirTree(dir);
-      pyodide.FS.writeFile(path, text);
+      const full = `${ROOT}/${path}`;
+      pyodide.FS.mkdirTree(full.slice(0, full.lastIndexOf('/')));
+      pyodide.FS.writeFile(full, text);
     }
-    pyodide.runPython(`import sys; sys.path.insert(0, "")`);
+    pyodide.runPython(`import sys; sys.path.insert(0, "${ROOT}")`);
     pyodide.runPython(`
 from pathlib import Path
 from finagent_safeguard.cli.linter import (
@@ -140,8 +177,11 @@ from finagent_safeguard.cli.linter import (
   } catch (err) {
     setStatus('failed to load', 'error');
     out.innerHTML =
-      `<pre class="ctx">  The linter could not load in this browser.\n\n  ${esc(err)}\n\n` +
-      `  Everything it does is reproducible offline:\n` +
+      `<pre class="ctx">  The linter could not load in this browser.\n\n` +
+      `${describeError(err)}\n\n` +
+      `  This is a defect worth reporting:\n` +
+      `    github.com/NaomiTitus/finagent-safeguard-sdk/issues\n\n` +
+      `  The tool itself does not need a browser:\n` +
       `    pip install -e . &amp;&amp; finagent-lint src/</pre>`;
   }
 }
@@ -178,7 +218,13 @@ except SyntaxError as exc:
 json.dumps(_payload)
 `);
   } catch (err) {
-    out.innerHTML = `<pre class="ctx">  ${esc(err)}</pre>`;
+    // The same `[object Object]` trap as the loader had. Fixed in both places:
+    // a scan that throws is rarer than a load that fails, and therefore the
+    // one a visitor is least equipped to work out for themselves.
+    out.innerHTML =
+      `<pre class="ctx">  The scan raised an error, which is a defect.\n\n` +
+      `${describeError(err)}\n\n` +
+      `  github.com/NaomiTitus/finagent-safeguard-sdk/issues</pre>`;
     return;
   }
   render(JSON.parse(result), withEdit);
