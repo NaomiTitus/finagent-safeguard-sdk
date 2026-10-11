@@ -17,6 +17,7 @@ import pytest
 from finagent_safeguard.regulation.registry import REGISTRY
 
 TESTS = Path(__file__).parent
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestCollectionSizesArePinned:
@@ -272,6 +273,76 @@ class TestReviewPacketsAreSelfServe:
         assert any("docs" in rule for rule in prep.EXCLUSIONS), (
             "the exclusion must be stated in the manifest, not merely implied"
         )
+
+
+class TestTheMutationDocMatchesTheCode:
+    """`docs/mutation-list.md` is prose; `BASELINE` is executed.
+
+    This exists because they drifted. The doc listed A1 as `unrun` while
+    `BASELINE` had it as `not_caught` -- so a verified hole in the agent gate
+    read, to anyone trusting the doc, as something nobody had got round to
+    trying. The doc also claimed to be the list when 36 of 93 rows were absent
+    from it.
+
+    The asymmetry is deliberate: the doc may cover a *subset*, because its job
+    is commentary on the rows that carry a lesson. What it may not do is
+    contradict the executed baseline about a row it does mention.
+    """
+
+    def _rows(self) -> tuple[dict[str, str], dict[str, str]]:
+        import importlib.util
+        import re
+
+        spec = importlib.util.spec_from_file_location(
+            "_mut", ROOT / "tools/run_mutations.py"
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        doc: dict[str, str] = {}
+        for line in (ROOT / "docs/mutation-list.md").read_text().splitlines():
+            match = re.match(r"\|\s*\*{0,2}([A-Z]+\d+[a-z]?)\*{0,2}\s*\|", line)
+            if not match:
+                continue
+            if "NOT CAUGHT" in line and "closed" not in line:
+                doc[match.group(1)] = "not_caught"
+            elif "| caught |" in line:
+                doc[match.group(1)] = "caught"
+        return dict(module.BASELINE), doc
+
+    def test_no_documented_row_contradicts_the_baseline(self) -> None:
+        baseline, doc = self._rows()
+        conflicts = [
+            f"{mid}: doc says {status}, BASELINE says {baseline[mid]}"
+            for mid, status in doc.items()
+            if mid in baseline and baseline[mid] != status
+        ]
+        assert not conflicts, (
+            "docs/mutation-list.md disagrees with the executed baseline. "
+            "BASELINE runs on every push; prose does not, so the doc is "
+            f"what is wrong: {conflicts}"
+        )
+
+    def test_the_doc_mentions_no_row_that_does_not_exist(self) -> None:
+        """A row renamed in the code leaves prose describing a mutation nobody
+        can run, which reads as coverage that is not there."""
+        baseline, doc = self._rows()
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_mut2", ROOT / "tools/run_mutations.py"
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        # The B-series is documented-only by construction: a subclass that
+        # never calls `super()` is not a textual edit anything can apply. The
+        # prefix is what keeps them distinguishable from executable rows, after
+        # two of them were numbered in the A-series and those numbers reused.
+        unmechanised = {mid for mid in doc if mid.startswith("B")}
+        ghosts = sorted(set(doc) - set(module.MUTATIONS) - unmechanised)
+        assert not ghosts, f"documented but not in MUTATIONS: {ghosts}"
 
 
 class TestTheGatesStayWired:

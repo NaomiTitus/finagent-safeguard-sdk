@@ -72,6 +72,19 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "(none expected)",
         "bind enforcement to the class, making it overridable",
     ),
+    "R12": (
+        REGIS,
+        "    def provisions(self) -> Iterator[Provision]:\n"
+        "        seen: set[Provision] = set()",
+        "    def provisions(self) -> Iterator[Provision]:\n"
+        "        return iter(())\n"
+        "        seen: set[Provision] = set()",
+        "test_every_provision_quotes_pinned_text",
+        "return no provisions, so every check that iterates the registry "
+        "passes by having nothing to check. docs/mutation-list.md claimed this "
+        "row was caught while no executable mutation existed for it -- a "
+        "verification claim nobody could run",
+    ),
     "R13": (
         REGIS,
         '    paragraph="2",\n    point="b",',
@@ -833,6 +846,7 @@ BASELINE: dict[str, str] = {
     # F-011 narrowed: citation structure is now validated against the span,
     # so fabricating Art. 5(9)(z) is caught. Hand-updated, which is the
     # intended friction -- a mutation becoming caught is a fix worth noticing.
+    "R12": "caught",
     "R13": "caught",
     "L1": "caught",
     "L2": "caught",
