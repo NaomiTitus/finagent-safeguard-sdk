@@ -91,6 +91,35 @@ function setStatus(text, state) {
   boot.dataset.state = state;
 }
 
+/* Say something a person can act on.
+ *
+ * The first version printed `${err}`, and when this page shipped broken that
+ * rendered as the literal text "[object Object]" -- emscripten's ErrnoError
+ * carries `name` and `errno` and no `message`, so String() finds nothing to
+ * say. A visitor saw a failure with no information in it, which is worse than
+ * a raw stack: it looks like a considered message and carries none.
+ */
+function describeError(err) {
+  if (!err) return '  (no error object)';
+  const parts = [];
+  if (err.name) parts.push(String(err.name));
+  if (err.message) parts.push(String(err.message));
+  if (err.errno !== undefined) parts.push(`errno ${err.errno}`);
+  // Nothing recognisable: fall back to JSON, which at least shows the shape.
+  if (!parts.length) {
+    try {
+      parts.push(JSON.stringify(err));
+    } catch {
+      parts.push(String(err));
+    }
+  }
+  const lines = [`  ${parts.join(' — ')}`];
+  if (err.stack && !/no stack/.test(err.stack)) {
+    lines.push('', ...String(err.stack).split('\n').slice(0, 4).map((l) => `  ${l}`));
+  }
+  return lines.join('\n');
+}
+
 /* ---------------------------------------------------------------- examples */
 EXAMPLES.forEach((ex, i) => {
   const b = document.createElement('button');
@@ -148,8 +177,11 @@ from finagent_safeguard.cli.linter import (
   } catch (err) {
     setStatus('failed to load', 'error');
     out.innerHTML =
-      `<pre class="ctx">  The linter could not load in this browser.\n\n  ${esc(err)}\n\n` +
-      `  Everything it does is reproducible offline:\n` +
+      `<pre class="ctx">  The linter could not load in this browser.\n\n` +
+      `${describeError(err)}\n\n` +
+      `  This is a defect worth reporting:\n` +
+      `    github.com/NaomiTitus/finagent-safeguard-sdk/issues\n\n` +
+      `  The tool itself does not need a browser:\n` +
       `    pip install -e . &amp;&amp; finagent-lint src/</pre>`;
   }
 }
