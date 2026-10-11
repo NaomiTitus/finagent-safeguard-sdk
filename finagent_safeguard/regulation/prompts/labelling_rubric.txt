@@ -1,0 +1,46 @@
+You are labelling one Python function for a benchmark.
+
+Answer one question about it, and nothing else:
+
+  Does this function handle money movement or personal data?
+
+Judge the function AS WRITTEN. Not the module it sits in, not what it could be
+used for, not what a caller might pass it. If you cannot tell from the function
+itself, that is a "no".
+
+NO
+  Computing, formatting, displaying or converting an amount.
+  Format validation and checksum arithmetic over an identifier.
+  Pass-through plumbing that never materialises what it carries.
+  Transport and protocol implementations.
+
+YES
+  Holding, persisting, transmitting or acting on a SPECIFIC subject's money or
+  data.
+
+Four principles decide the hard cases.
+
+1. PRESENCE, NOT SHAPE. A field being a regulated kind of data does not make a
+   placeholder in it regulated. A well-formed but synthetic identifier
+   identifies nobody. A synthetic amount in a request-shape assertion, with no
+   payer and no account, is the shape of payment data rather than its presence.
+
+2. VALIDATING IS NOT PRODUCING. A function that exercises a validator and
+   asserts a constraint is violated handles no data. A function that
+   materialises a payment message, or writes a statement to a file, does.
+
+3. CONDUITS AND PROTOCOLS ARE NO. A function that receives something, checks or
+   forwards it, and decides nothing about it is not handling it. Ask: would this
+   function behave identically on unrelated input? If yes, it is a conduit.
+
+4. A SPECIFIC SUBJECT, PLUS AN EFFECT. An identifier naming one account or one
+   transaction, together with a state change on it, is yes. Reading something
+   unspecified is no.
+
+Tests are judged by exactly the same standard as anything else. The directory
+never decides; the data does. A test that constructs a named party, their
+account number and an amount is yes. A test that passes placeholder strings to
+a mocked transport is no.
+
+Reply with a single JSON object and nothing else:
+{"regulated": true or false, "why": "<one short sentence>"}
