@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from finagent_safeguard.cli.linter import ADVISORY_SIGNALS, main, unresolved_functions
 
 MONEY = (
@@ -76,6 +78,77 @@ class TestDiffOnlyWritesNothing:
         out = capsys.readouterr().out
         assert "execute_credit_transfer" in out
         assert "@regulated_tool" in out
+
+
+class TestApprovingTheExactEdit:
+    """The two-invocation workflow: read a diff, then authorise that diff.
+
+    Exit status matters as much as the refusal. A `--fix` that refuses because
+    the approval is stale must not exit 0, or a pipeline treats "I wrote
+    nothing because you approved something else" as success.
+    """
+
+    def _digest(self, path: Path, capsys) -> str:  # type: ignore[no-untyped-def]
+        main([str(path), "--diff-only"])
+        for line in capsys.readouterr().out.splitlines():
+            if line.strip().startswith("plan "):
+                return line.split()[1]
+        raise AssertionError("--diff-only printed no plan digest to approve")
+
+    def test_diff_only_prints_a_digest_to_approve(
+        self, tmp_path: Path, capsys  # type: ignore[no-untyped-def]
+    ) -> None:
+        path = _write(tmp_path, "pay.py", MONEY)
+        assert len(self._digest(path, capsys)) == 12
+
+    def test_a_clean_file_offers_no_digest(
+        self, tmp_path: Path, capsys  # type: ignore[no-untyped-def]
+    ) -> None:
+        """There is nothing to approve, so offering a handle for it would
+        invite a developer to authorise an empty edit."""
+        path = _write(tmp_path, "ok.py", CLEAN)
+        main([str(path), "--diff-only"])
+        assert "plan " not in capsys.readouterr().out
+
+    def test_the_printed_digest_authorises_the_write(
+        self, tmp_path: Path, capsys  # type: ignore[no-untyped-def]
+    ) -> None:
+        path = _write(tmp_path, "pay.py", MONEY)
+        digest = self._digest(path, capsys)
+        assert main([str(path), "--fix", "--expect-plan", digest]) == 1
+        assert b"REVIEW_REQUIRED" in path.read_bytes()
+
+    def test_a_stale_approval_refuses_and_does_not_exit_zero(
+        self, tmp_path: Path, capsys  # type: ignore[no-untyped-def]
+    ) -> None:
+        path = _write(tmp_path, "pay.py", MONEY)
+        digest = self._digest(path, capsys)
+        path.write_text(MONEY + "\n\ndef charge_card(pan: str) -> None:\n    pass\n")
+        before = path.read_bytes()
+
+        assert main([str(path), "--fix", "--expect-plan", digest]) == 2
+        assert path.read_bytes() == before
+        err = capsys.readouterr().err
+        assert "not the plan" in err
+
+    def test_expect_plan_without_fix_is_a_usage_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Exit 2, not 1: the tool did not work, rather than found something."""
+        path = _write(tmp_path, "pay.py", MONEY)
+        with pytest.raises(SystemExit) as exc:
+            main([str(path), "--expect-plan", "abc123"])
+        assert exc.value.code == 2
+
+    def test_a_malformed_digest_is_a_usage_error_not_a_refusal(
+        self, tmp_path: Path
+    ) -> None:
+        """A typo must not read as "the file changed". One is the developer's
+        mistake to fix in the shell; the other sends them to re-read a diff."""
+        path = _write(tmp_path, "pay.py", MONEY)
+        with pytest.raises(SystemExit) as exc:
+            main([str(path), "--fix", "--expect-plan", "not-a-digest"])
+        assert exc.value.code == 2
 
 
 class TestUnresolvedFlags:

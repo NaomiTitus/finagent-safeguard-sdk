@@ -84,6 +84,39 @@ row here is itself a review finding.
 | **A11** | **Replace `TOOL_REGISTRY` with a dict whose `get` always answers** | **none — see F-007** | **NOT CAUGHT** |
 | **A12** | **Reassign `agent.tools` after construction** | **none — see F-008** | **NOT CAUGHT** |
 
+## `cli/linter.py` — the approval guard
+
+Layer 3 of this tool is a human confirming a classification, so the bytes
+approved must be the bytes written. `--diff-only` previously showed a diff and
+`--fix` recomputed one; nothing tied them together.
+
+| # | Mutation | Expected killer | Status |
+|---|---|---|---|
+| P1 | Ignore the approved digest, making `--expect-plan` decorative | `test_approving_a_different_edit_is_refused` | caught |
+| **P2** | **Skip the on-disk re-read, so a plan computed from an older version silently overwrites a change made since — the race that separating plan from write would *widen* rather than fix** | `test_a_stale_plan_object_is_refused_at_write_time` | caught |
+| P3 | Drop the approval passing through `apply_fix`, so the CLI's flag is accepted and discarded | `test_approving_a_different_edit_is_refused` | caught |
+| P4 | Digest the input instead of the output, so two different edits share an approval | `test_a_plan_carries_the_digest_of_its_own_output` | caught |
+| P5 | Accept a malformed digest, so a typo reads as "the file changed" | `test_a_malformed_digest_is_a_usage_error_not_a_refusal` | caught |
+| P6 | Drop the `if it applies` framing, turning a paste-ready lookup into what reads as the tool's own conclusion | `test_a_suggested_decorator_is_conditional_and_not_the_one_applied` | caught |
+| **P7** | **Narrow TFR Art 4(4) to one category** — a payer-information control sitting in AML/CFT practice *and* payment execution, so choosing for the developer is the assertion the module refuses to make | `test_a_provision_filed_under_two_categories_shows_both` | caught |
+| P8 | Stop telling a developer that decorators stack, on exactly the functions where two apply | `test_stacking_is_mentioned_only_when_more_than_one_vocabulary_matched` | caught |
+| P9 | Abbreviate the plan digest to three characters — short enough to collide between two genuinely different edits | `test_a_plan_carries_the_digest_of_its_own_output` | caught |
+
+**P7 caught a vacuous test as it was written.** The test asserted that both
+category names appeared *anywhere* in the comment block — but
+`PSD2_PAYMENT_EXECUTION` is also suggested by the two Art 97 candidates, so
+narrowing TFR to one category left it passing. It now reads the suggestions
+that follow the TFR citation specifically. **That is the second vacuous test
+this protocol found in one session**, both with accurate names and bodies that
+could not fail.
+
+**A vacuous test was found while writing these.**
+`test_the_plan_is_what_gets_written` claimed *"the diff a developer approves
+must be the bytes that land"* and proved nothing: it planned, then called
+`apply_fix` which **re-planned**, and two plans of an unchanged file agree
+whether or not the write honours the approval. It now applies the plan object,
+which is the only form that can distinguish the two.
+
 ## `cli/features.py`
 
 The feature module is **advisory research code, not a guard**: nothing in the

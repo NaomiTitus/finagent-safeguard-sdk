@@ -465,6 +465,90 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "honour a hand-set _regulated attribute",
     ),
 
+    # ---- the approval guard (day 11) ------------------------------------
+    # Layer 3 is a human confirming a classification, so the approved bytes
+    # must be the written bytes. These rows protect the two independent checks
+    # that make that true, and the distinction between a typo and a refusal.
+    "P1": (
+        LINT,
+        "    if expect is not None and not plan.plan_sha.startswith(expect.lower()):",
+        "    if False:",
+        "test_approving_a_different_edit_is_refused",
+        "ignore the approved digest, so --expect-plan accepts any value and the "
+        "approval becomes decorative",
+    ),
+    "P2": (
+        LINT,
+        "    on_disk = hashlib.sha256(path.read_bytes()).hexdigest()\n"
+        "    if on_disk != plan.base_sha:",
+        "    on_disk = plan.base_sha\n    if False:",
+        "test_a_stale_plan_object_is_refused_at_write_time",
+        "skip the on-disk re-read, so a plan computed from an older version of "
+        "the file silently overwrites a change made since. This is the race "
+        "that separating plan from write would otherwise WIDEN rather than fix",
+    ),
+    "P3": (
+        LINT,
+        "    return apply_plan(plan_fix(path, findings), expect=expect)",
+        "    return apply_plan(plan_fix(path, findings))",
+        "test_approving_a_different_edit_is_refused",
+        "drop the approval on the way through apply_fix, so the CLI's "
+        "--expect-plan is accepted and then discarded",
+    ),
+    "P4": (
+        LINT,
+        '        plan_sha=hashlib.sha256(new_bytes).hexdigest(),',
+        '        plan_sha=base_sha,',
+        "test_a_plan_carries_the_digest_of_its_own_output",
+        "digest the input instead of the output, so two different edits of the "
+        "same file share an approval",
+    ),
+    "P5": (
+        LINT,
+        '    if args.expect_plan and not _HEX.fullmatch(args.expect_plan):',
+        '    if False:',
+        "test_a_malformed_digest_is_a_usage_error_not_a_refusal",
+        "accept a malformed digest, so a typo reads as 'the file changed' and "
+        "sends the developer to re-read a diff that was never wrong",
+    ),
+    "P6": (
+        LINT,
+        '                    "#       if it applies:  "',
+        '                    "#       "',
+        "test_a_suggested_decorator_is_conditional_and_not_the_one_applied",
+        "drop the 'if it applies' framing, turning a paste-ready lookup into "
+        "what reads as the tool's own conclusion about which category applies",
+    ),
+    "P7": (
+        CAND,
+        "            files_as=(\n"
+        "                FinancialCategory.AML_TRANSACTION_MONITORING,\n"
+        "                FinancialCategory.PSD2_PAYMENT_EXECUTION,\n"
+        "            ),",
+        "            files_as=(FinancialCategory.AML_TRANSACTION_MONITORING,),",
+        "test_a_provision_filed_under_two_categories_shows_both",
+        "narrow TFR Art 4(4) to one category. It is a payer-information control "
+        "sitting in AML/CFT practice and in payment execution both, so choosing "
+        "for the developer is the assertion this module refuses to make",
+    ),
+    "P8": (
+        LINT,
+        "    if len(finding.vocabularies) > 1:",
+        "    if False:",
+        "test_stacking_is_mentioned_only_when_more_than_one_vocabulary_matched",
+        "stop telling a developer that decorators stack, on exactly the "
+        "functions where two apply -- the singular 'the category' then quietly "
+        "argues for picking one",
+    ),
+    "P9": (
+        LINT,
+        "        return self.plan_sha[:12]",
+        "        return self.plan_sha[:3]",
+        "test_a_plan_carries_the_digest_of_its_own_output",
+        "abbreviate the plan digest to three characters. Short enough to "
+        "collide between two genuinely different edits, so a developer could "
+        "approve one diff and have another written under the same handle",
+    ),
     # ---- finagent_safeguard/cli/features.py -----------------------------
     # The feature module is advisory research code rather than a guard: no
     # mutation here can mislabel a function, because nothing in the write path
@@ -832,6 +916,15 @@ BASELINE: dict[str, str] = {
     "F21": "caught",
     "F22": "caught",
     "F23": "caught",
+    "P1": "caught",
+    "P2": "caught",
+    "P3": "caught",
+    "P4": "caught",
+    "P5": "caught",
+    "P6": "caught",
+    "P7": "caught",
+    "P8": "caught",
+    "P9": "caught",
 }
 
 

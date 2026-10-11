@@ -365,13 +365,110 @@ class TestWhatIsWrittenIntoSource:
         block = "\n".join(_render_annotation(found[0]))
         assert "FinancialCategory.REVIEW_REQUIRED" in block
         assert "money identifiers" in block
-        assert "Replace REVIEW_REQUIRED with the category you have confirmed" in block
+        assert "Replace REVIEW_REQUIRED with the categories you have confirmed" in block
         # Candidate provisions are offered, which is the opposite of asserting
-        # one: they appear under a heading that says to read them, and the
-        # decorator itself still names no regulation.
+        # one: they appear under a heading that says to read them.
         assert "candidates to read before deciding" in block
         assert "PSD2 Art 97(1)(b)" in block
-        assert "@regulated_tool(FinancialCategory.PSD2" not in block
+
+    def test_a_suggested_decorator_is_conditional_and_not_the_one_applied(
+        self, tmp_path: Path
+    ) -> None:
+        """Each candidate now shows the decorator to paste, and that is a
+        lookup rather than a conclusion.
+
+        This test previously asserted the opposite -- that no real category
+        appeared in the block at all. That was the right guard while the only
+        way to name a category was to assert it. Showing one per candidate,
+        prefixed "if it applies", answers a different question: *what do I type
+        if I decide this provision applies?* The judgement is untouched, so
+        what has to be pinned is the framing, and specifically that the
+        decorator actually applied is still the refusal.
+        """
+        from finagent_safeguard.cli.linter import _render_annotation
+
+        found = _findings(
+            tmp_path,
+            "from decimal import Decimal\n\n\ndef settle(amount: Decimal) -> None:\n    pass\n",
+        )
+        lines = _render_annotation(found[0])
+        block = "\n".join(lines)
+
+        # Suggestions are present, and every one of them is conditional.
+        suggested = [
+            line for line in lines
+            if "@regulated_tool(FinancialCategory." in line
+            and "REVIEW_REQUIRED" not in line
+        ]
+        assert suggested, "a developer should be shown what to paste"
+        for line in suggested:
+            assert line.lstrip("# ").startswith("if it applies:"), line
+
+        # The decorator that is actually written is still the refusal, and it
+        # is the only unconditional one.
+        assert lines[0] == "@regulated_tool(FinancialCategory.REVIEW_REQUIRED)"
+        unconditional = [
+            line for line in lines[1:]
+            if "@regulated_tool" in line and "if it applies" not in line
+        ]
+        assert unconditional == [], unconditional
+        assert "PSD2_PAYMENT_EXECUTION" in block
+
+    def test_a_provision_filed_under_two_categories_shows_both(
+        self, tmp_path: Path
+    ) -> None:
+        """TFR Art 4(4) is a payer-information control that sits in AML/CFT
+        practice and in payment execution both. Picking one for the developer
+        would be the assertion the candidate mechanism refuses to make, so both
+        are offered."""
+        from finagent_safeguard.cli.linter import _render_annotation
+
+        found = _findings(
+            tmp_path,
+            "from decimal import Decimal\n\n\ndef settle(amount: Decimal) -> None:\n    pass\n",
+        )
+        lines = _render_annotation(found[0])
+
+        # Read the suggestions that follow the TFR citation specifically.
+        #
+        # Asserting the two category names appear anywhere in the block was
+        # vacuous: PSD2_PAYMENT_EXECUTION is also suggested by both Art 97
+        # candidates, so narrowing TFR to one category left the assertion
+        # passing. Mutation P7 survived and said so.
+        start = next(
+            i for i, line in enumerate(lines) if "TFR Art 4(4)" in line
+        )
+        suggestions = []
+        for line in lines[start + 1:]:
+            if "if it applies:" not in line:
+                break
+            suggestions.append(line)
+
+        assert len(suggestions) == 2, suggestions
+        joined = "\n".join(suggestions)
+        assert "AML_TRANSACTION_MONITORING" in joined
+        assert "PSD2_PAYMENT_EXECUTION" in joined
+
+    def test_stacking_is_mentioned_only_when_more_than_one_vocabulary_matched(
+        self, tmp_path: Path
+    ) -> None:
+        """A money+PII function usually needs two decorators, which the
+        singular "the category you have confirmed" quietly argued against. Said
+        where it is true, and not where it would be noise."""
+        from finagent_safeguard.cli.linter import _render_annotation
+
+        both = _findings(
+            tmp_path,
+            "def transfer_funds(iban: str, amount: int, customer_id: str) -> None:\n"
+            "    pass\n",
+        )
+        assert "stacks" in "\n".join(_render_annotation(both[0]))
+
+        one = _findings(
+            tmp_path,
+            "from decimal import Decimal\n\n\ndef settle(amount: Decimal) -> None:\n    pass\n",
+        )
+        assert "stacks" not in "\n".join(_render_annotation(one[0]))
 
 
 class TestBankReachability:
