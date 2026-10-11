@@ -626,15 +626,30 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
     ),
     "F20": (
         FEAT,
-        "MODEL_FEATURES: Final[tuple[str, ...]] = tuple(\n"
-        "    name\n"
-        "    for group, members in FEATURE_GROUPS.items()\n"
-        "    if group not in EXCLUDED_GROUPS\n"
-        "    for name in members\n"
-        ")",
-        "MODEL_FEATURES: Final[tuple[str, ...]] = FEATURE_NAMES",
+        # Anchored on the one clause, not the whole comprehension: the
+        # previous form broke the moment a line was added to it, which is a
+        # stale baseline rather than a finding.
+        "    if group not in EXCLUDED_GROUPS\n",
+        "",
         "test_the_harmful_group_is_not_fitted",
         "fit on everything extract produces, ignoring the exclusion entirely",
+    ),
+    "F21": (
+        FEAT,
+        'EXCLUDED_FEATURES: Final[tuple[str, ...]] = ("pii_hits",)',
+        "EXCLUDED_FEATURES: Final[tuple[str, ...]] = ()",
+        "test_the_redundant_signature_feature_is_not_fitted",
+        "refit pii_hits alongside both_vocabularies, which is derived from it. "
+        "Worth -0.019 LORO AUC: L2 splits one feature's credit across two "
+        "expressions of the same scan",
+    ),
+    "F22": (
+        FEAT,
+        "    for name in members\n    if name not in EXCLUDED_FEATURES\n)",
+        "    for name in members\n)",
+        "test_the_redundant_signature_feature_is_not_fitted",
+        "ignore EXCLUDED_FEATURES when building the fitted set, so declaring an "
+        "exclusion has no effect",
     ),
     # ---- finagent_safeguard/cli/classifier.py ---------------------------
     # Same standing: the classifier ranks a review queue, it does not gate.
@@ -801,6 +816,8 @@ BASELINE: dict[str, str] = {
     "M5": "caught",
     "M6": "caught",
     "M7": "caught",
+    "F21": "caught",
+    "F22": "caught",
 }
 
 

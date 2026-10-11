@@ -43,6 +43,7 @@ if str(ROOT) not in sys.path:
 
 from finagent_safeguard.cli.classifier import Model, fit  # noqa: E402
 from finagent_safeguard.cli.features import (  # noqa: E402
+    EXCLUDED_FEATURES,
     EXCLUDED_GROUPS,
     FEATURE_GROUPS,
     FEATURE_NAMES,
@@ -417,11 +418,16 @@ def main(argv: list[str] | None = None) -> int:
             kept = tuple(n for n in MODEL_FEATURES if n not in members)
             if not kept:
                 continue
+            dropped = tuple(n for n in members if n in EXCLUDED_FEATURES)
+            note = f"  (already without {', '.join(dropped)})" if dropped else ""
             loro_without = leave_one_repo_out(train_x, train_y, repos, kept)
             score = _macro(loro_without, "auc")
             delta = base_auc - score
             verdict = "earns it" if delta > 0.01 else "no measurable gain"
-            print(f"  without {group:<12} AUC {score:.3f}   delta {delta:+.3f}   {verdict}")
+            print(
+                f"  without {group:<12} AUC {score:.3f}   delta {delta:+.3f}"
+                f"   {verdict}{note}"
+            )
 
     if args.cv or not (args.ablate or args.final or args.loro or args.loro_ablate):
         _report_cv(_cross_validate(train_x, train_y, MODEL_FEATURES), "cross-validated")
@@ -434,6 +440,8 @@ def main(argv: list[str] | None = None) -> int:
             kept = tuple(n for n in MODEL_FEATURES if n not in members)
             if not kept:
                 continue
+            dropped = tuple(n for n in members if n in EXCLUDED_FEATURES)
+            note = f"  (already without {', '.join(dropped)})" if dropped else ""
             without = _cross_validate(train_x, train_y, kept, repeats=2)
             _, score, _ = _spread(without, "f1")
             delta = base - score

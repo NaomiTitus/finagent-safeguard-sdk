@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 
 from finagent_safeguard.cli.features import (
+    EXCLUDED_FEATURES,
     EXCLUDED_GROUPS,
     FEATURE_GROUPS,
     FEATURE_NAMES,
@@ -177,6 +178,28 @@ class TestTheFittedSet:
         """A fitted name `extract` does not produce would raise at scan time
         on every single function, so this is the cheap end of that failure."""
         assert set(MODEL_FEATURES) <= set(FEATURE_NAMES)
+
+    def test_the_redundant_signature_feature_is_not_fitted(self) -> None:
+        """`pii_hits` is excluded for redundancy, not for being wrong.
+
+        `both_vocabularies` is `1 if money_hits and pii_hits` over the same scan
+        of the same names, so it can only fire where `pii_hits` already has
+        (r = 0.547). Fitting both split one feature's credit across two
+        expressions of it; dropping `pii_hits` is worth +0.019 LORO AUC,
+        95% CI [+0.009, +0.032].
+        """
+        assert "pii_hits" not in MODEL_FEATURES
+
+    def test_the_excluded_feature_is_still_produced(self) -> None:
+        """Kept visible to a human reading the ranked queue, and kept as the
+        evidence for its own exclusion. The same reason the `literal` group
+        survives in the codebase."""
+        assert "pii_hits" in FEATURE_NAMES
+        assert "pii_hits" in _one("def f(email):\n    pass\n")
+
+    def test_the_feature_exclusion_is_declared_rather_than_implied(self) -> None:
+        for name in EXCLUDED_FEATURES:
+            assert name in FEATURE_NAMES, name
 
     def test_the_exclusion_is_declared_rather_than_implied(self) -> None:
         """Naming the excluded group keeps the reason discoverable. An

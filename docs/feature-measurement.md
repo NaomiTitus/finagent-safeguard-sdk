@@ -86,7 +86,8 @@ positives to fit. So this was tried first, and the embedding only after
 | repository-prior baseline | 0.500 | 0.000 |
 | original 16 | 0.576 | +0.108 |
 | 16 minus `literal` (12) | 0.645 | +0.059 |
-| **17 — minus `literal`, plus `dataflow` and `docstring`** | **0.774** | **+0.165** |
+| 17 — minus `literal`, plus `dataflow` and `docstring` | 0.774 | +0.165 |
+| **16 — also minus `pii_hits`** | **0.793** | **+0.152** |
 
 Per fold, for the shipped 17:
 
@@ -137,6 +138,76 @@ within the noise this corpus can resolve, and dropping a group on a
 three-fold average is how the `literal` mistake happened in the other
 direction. It is flagged as the next thing to measure when more repositories
 are available, not quietly retained.
+
+### `pii_hits`: dropped, and not for being wrong
+
+The `vocabulary` group's −0.018 turned out to be **one feature**, and the
+reason is redundancy rather than error.
+
+| Dropped | Δ LORO AUC | 95% CI | P(no gain) |
+|---|---:|---|---:|
+| **`pii_hits`** | **+0.019** | [+0.009, +0.032] | **0.00** |
+| `money_hits` | +0.005 | [−0.002, +0.014] | 0.09 |
+| `both_vocabularies` | +0.001 | [−0.001, +0.003] | 0.15 |
+| whole `vocabulary` group | +0.018 | [+0.007, +0.030] | 0.00 |
+| *control:* `verb` group (which earns its place) | −0.021 | [−0.071, +0.026] | 0.82 |
+
+The control is what makes the first row safe to act on: removing three features
+that **do** earn their place gives a negative point estimate and an interval
+three times wider. Dropping `pii_hits` does not look like "removing any three
+features from an over-parameterised model".
+
+**Two mechanisms were proposed and measured, and both were wrong.**
+
+*Wrong hypothesis 1 — "it means different things in different repositories."*
+No. Its within-repository correlation with the label is positive everywhere, and
+its spread across repositories (0.192) is **smaller** than that of
+`sensitive_subscripts` (0.417), which transfers fine.
+
+*Wrong hypothesis 2 — "the model is over-parameterised, so removing any weak
+feature helps."* No. `risky_annotation` fires on **one row in 996** and dropping
+it is worth +0.003 with an interval touching zero. Dropping the four
+near-dead features together (+0.014) is worth **less** than dropping `pii_hits`
+alone.
+
+**The actual mechanism: redundancy.** `both_vocabularies` is literally
+`1 if money_hits and pii_hits`, computed from the same scan of the same names,
+so it can only fire where `pii_hits` already has — r = 0.547, and that is not a
+coincidence, one is derived from the other. L2 was splitting a single feature's
+credit across two expressions of it:
+
+| | weight with `pii_hits` | without it |
+|---|---:|---:|
+| `both_vocabularies` | +1.831 | **+2.283** |
+| every other feature | — | moves < 0.04 |
+
+So the signal is not lost by dropping it, it is **concentrated**. On its own
+`pii_hits` is a *good* feature — P(label is yes \| it fires) is 0.50 against a
+0.09 base rate in django-oscar, 0.83 against 0.37 in stripe-python.
+
+**Why it was always going to be weak.** It scans the **signature** only — the
+function's own name and its parameters, never the body. Real code takes a `row`
+or a `self` and reads the sensitive key inside, so `def store(row)` reading
+`row['email']` scores zero. That is why it fires on just 23 of 996 functions,
+and why `sensitive_subscripts`, which reads the body, is worth +0.092 instead.
+
+| | `pii_hits` |
+|---|---:|
+| `def send_receipt(customer_email, amount)` | 1 |
+| `def validate(national_id)` | 1 |
+| `def _create_header(self)` reading `self._config['name']` | 0 |
+| `def store(row)` reading `row['email']` | 0 |
+
+Result: **16 fitted features, LORO macro AUC 0.793**, with `python-sepaxml`
+moving 0.637 → 0.696.
+
+**The caveat is recorded with the decision.** `pii_hits` was selected by testing
+six candidate drops against the **same three scoreable folds** it is then
+measured on. The interval is tight and the collinearity is independent
+evidence, so it is acted on — but a selection made on three repositories is the
+same shape as the mistake leave-one-repository-out exists to catch. It is
+flagged in `EXCLUDED_FEATURES` as provisional, to revisit when more
+repositories are scoreable.
 
 ### The canonical hard pair, separated on two independent signals
 

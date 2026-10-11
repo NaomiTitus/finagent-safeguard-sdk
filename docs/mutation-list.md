@@ -117,6 +117,8 @@ scores about the same" is therefore not evidence that a feature works.
 | F18 | Pin `FEATURE_NAMES` to one group, so adding a group has no effect | `test_extract_returns_the_declared_set` | caught |
 | **F19** | **Refit the `literal` group, which measured −0.069 LORO AUC** — strongest group under a stratified split (+0.172), worst under leave-one-repository-out | `test_the_harmful_group_is_not_fitted` | caught |
 | F20 | Fit on everything `extract` produces, ignoring `EXCLUDED_GROUPS` entirely | `test_the_harmful_group_is_not_fitted` | caught |
+| F21 | Refit `pii_hits` alongside `both_vocabularies`, which is derived from it — worth −0.019 LORO AUC | `test_the_redundant_signature_feature_is_not_fitted` | caught |
+| F22 | Ignore `EXCLUDED_FEATURES` when building the fitted set, so declaring an exclusion has no effect | `test_the_redundant_signature_feature_is_not_fitted` | caught |
 
 ## `cli/classifier.py`
 
