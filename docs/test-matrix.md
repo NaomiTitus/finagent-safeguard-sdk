@@ -2,7 +2,20 @@
 
 **Companion to:** `PLAN.md` (design intent). This file owns the test inventory; PLAN.md §7 owns the day structure.
 **Date:** 2026-10-03
-**Status:** scaffolding. Boundary values here are destined for `examples[]` on registry entries (Day 1 / Day 4), after which pytest parametrises from the registry and this file becomes a planning record rather than an authority. Do not let it become a second source of truth.
+**Status:** **RED-phase specification, not an inventory of what exists.** It was
+written before implementation and the project was later rescoped to the linter,
+so **8 of the 14 test files named below do not exist** — `test_telemetry.py`,
+`test_identifiers.py`, `test_entailment.py`, `test_generated_docs.py`,
+`test_packaging.py`, `test_workflow.py`, `test_example.py`, and the
+`properties/` and `spec/` SCA suites. Their sections describe the obligation
+and telemetry layers that were descoped; see the note at the top of `PLAN.md`.
+
+For what is actually tested, the suite is the authority: `pytest tests/ -q`
+reports the count, `tools/battery.py` runs the review layers, and
+`docs/mutation-list.md` annotates the mutation rows. Boundary values here were
+destined for `examples[]` on registry entries, after which pytest would
+parametrise from the registry. Do not let this file become a second source of
+truth.
 
 **How to read:** every row is one RED-phase test. `Cites` names the pinned provision whose verbatim span must be quoted in the test docstring — a paraphrase means the test is not done (PLAN.md §3). `May assume` names the fixtures the test is permitted to rely on; anything not listed must be constructed in the test.
 
@@ -247,7 +260,13 @@ Helper: `remote(amount, counters=FRESH, **kw)` builds a remote-electronic EUR co
 
 ---
 
-## 8. Telemetry — `tests/test_telemetry.py`
+## 8. Telemetry — `tests/test_telemetry.py` — **DESCOPED, not built**
+
+The rows below are the specification as written. No telemetry layer, no
+`docker-compose.yml`, and no `tests/test_telemetry.py` exist. Kept because the
+reasoning in the right-hand column — a lost metric is not a compliance breach,
+but an unwritable evidence report is — is the part worth keeping, and because a
+section silently deleted is indistinguishable from one nobody thought about.
 
 | Test | Inputs | Expected |
 |---|---|---|

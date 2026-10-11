@@ -382,3 +382,143 @@ class TestTheDiffRatchet:
         )
         self._commit(tmp_path, body, "delete one")
         assert self._run(tmp_path, "--since", "HEAD~1") == 0
+
+
+class TestExcludingPaths:
+    """A first run that is 80% test-file noise gets the tool switched off.
+
+    Exclusion is an adoption aid, not a security boundary: everything it skips
+    is simply not scanned, so the failure mode of a too-broad pattern is a
+    quiet pass. That is why the count is always reported and a pattern matching
+    nothing warns.
+    """
+
+    def _tree(self, root: Path) -> None:
+        _write(root, "src/app/pay.py", MONEY)
+        _write(root, "src/tests/test_pay.py", MONEY)
+
+    def test_without_exclude_everything_is_scanned(
+        self, tmp_path: Path, capsys  # type: ignore[no-untyped-def]
+    ) -> None:
+        self._tree(tmp_path)
+        main([str(tmp_path)])
+        assert "2 file(s) scanned" in capsys.readouterr().out
+
+    def test_a_nested_directory_pattern_matches(
+        self, tmp_path: Path, capsys  # type: ignore[no-untyped-def]
+    ) -> None:
+        """The case plain `fnmatch` gets wrong, and the one a developer will
+        actually type. `fnmatch` anchors at the start of the string, so
+        'tests/*' does not match 'src/tests/test_pay.py' -- the obvious pattern
+        would silently exclude nothing.
+        """
+        self._tree(tmp_path)
+        main([str(tmp_path), "--exclude", "tests/*"])
+        out = capsys.readouterr().out
+        assert "1 file(s) scanned" in out
+        assert "1 file(s) excluded" in out
+
+    def test_a_bare_directory_name_excludes_its_contents(
+        self, tmp_path: Path, capsys  # type: ignore[no-untyped-def]
+    ) -> None:
+        """`--exclude tests` plainly means the directory, to any reader."""
+        self._tree(tmp_path)
+        main([str(tmp_path), "--exclude", "tests"])
+        assert "1 file(s) excluded" in capsys.readouterr().out
+
+    def test_a_filename_pattern_matches(
+        self, tmp_path: Path, capsys  # type: ignore[no-untyped-def]
+    ) -> None:
+        self._tree(tmp_path)
+        main([str(tmp_path), "--exclude", "*/test_*.py"])
+        assert "1 file(s) excluded" in capsys.readouterr().out
+
+    def test_the_count_is_always_reported(
+        self, tmp_path: Path, capsys  # type: ignore[no-untyped-def]
+    ) -> None:
+        """Silence about what was skipped is how a too-broad pattern turns
+        into a green build that means nothing."""
+        self._tree(tmp_path)
+        main([str(tmp_path), "--exclude", "src/*"])
+        out = capsys.readouterr().out
+        assert "0 file(s) scanned" in out
+        assert "2 file(s) excluded" in out
+
+    def test_a_pattern_matching_nothing_warns(
+        self, tmp_path: Path, capsys  # type: ignore[no-untyped-def]
+    ) -> None:
+        """The commonest mistake: a pattern that matches nothing, and a run
+        that therefore looks clean for the wrong reason."""
+        self._tree(tmp_path)
+        main([str(tmp_path), "--exclude", "nope/*"])
+        captured = capsys.readouterr()
+        assert "matched no files" in captured.err
+        assert "2 file(s) scanned" in captured.out
+
+    def test_an_explicitly_named_file_is_still_excluded(
+        self, tmp_path: Path, capsys  # type: ignore[no-untyped-def]
+    ) -> None:
+        """A flag that silently does not apply is worse than one that is not
+        there. If the pattern matches, the file is skipped however it was
+        reached."""
+        self._tree(tmp_path)
+        main([str(tmp_path / "src/tests/test_pay.py"), "--exclude", "tests/*"])
+        out = capsys.readouterr().out
+        assert "0 file(s) scanned" in out
+        assert "1 file(s) excluded" in out
+
+    def test_a_pattern_does_not_match_across_a_directory_separator(
+        self, tmp_path: Path, capsys  # type: ignore[no-untyped-def]
+    ) -> None:
+        """The bug the first implementation shipped with, pinned.
+
+        Under `fnmatch`, `*` spans `/`. So `--exclude '*/test_*.py'` matched
+        `~/test_project/src/app/pay.py` -- an ancestor directory beginning with
+        `test_` was enough to exclude a developer's entire tree, reported only
+        as a count they had no reason to question.
+
+        `PurePath.match` does not cross separators, which is why it is used
+        instead. Asserted on a path whose *ancestor* carries the pattern and
+        whose filename does not.
+        """
+        _write(tmp_path, "test_project/src/app/pay.py", MONEY)
+        main([str(tmp_path), "--exclude", "*/test_*.py"])
+        out = capsys.readouterr().out
+        assert "1 file(s) scanned" in out
+        assert "excluded" not in out
+
+    def test_a_pattern_is_anchored_at_the_right(
+        self, tmp_path: Path, capsys  # type: ignore[no-untyped-def]
+    ) -> None:
+        """The other half of why `fnmatch` was wrong: it anchors left, so
+        `tests/*` would not match `src/tests/x.py` and the obvious pattern
+        would silently exclude nothing."""
+        _write(tmp_path, "a/b/c/tests/test_x.py", MONEY)
+        main([str(tmp_path), "--exclude", "tests/*"])
+        assert "1 file(s) excluded" in capsys.readouterr().out
+
+    def test_several_patterns_compose(
+        self, tmp_path: Path, capsys  # type: ignore[no-untyped-def]
+    ) -> None:
+        self._tree(tmp_path)
+        _write(tmp_path, "src/app/vendor.py", MONEY)
+        main([
+            str(tmp_path), "--exclude", "tests/*", "--exclude", "*/vendor.py",
+        ])
+        out = capsys.readouterr().out
+        assert "1 file(s) scanned" in out
+        assert "2 file(s) excluded" in out
+
+    def test_exclusion_does_not_change_the_exit_status_of_what_remains(
+        self, tmp_path: Path
+    ) -> None:
+        """Excluding the noise must not also excuse the findings."""
+        self._tree(tmp_path)
+        assert main([str(tmp_path), "--exclude", "tests/*"]) == 1
+
+    def test_excluding_everything_exits_clean(self, tmp_path: Path) -> None:
+        """Honest, and the reason the count is printed: a developer who
+        excludes their whole tree gets a green run, and the summary is what
+        tells them why."""
+        self._tree(tmp_path)
+        assert main([str(tmp_path), "--exclude", "src/*"]) == 0

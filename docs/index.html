@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FinAgent-SafeGuard — try the linter</title>
+<meta name="description" content="A governance linter for EU financial regulation that refuses to guess. Runs in your browser.">
+<style>
+  /* The palette is taken from the subject: the muted paper and ink of a
+     printed regulation, with one accent for the thing that needs a decision.
+     Deliberately not a terminal-green hacker look -- the audience is a bank. */
+  :root {
+    --paper:   #faf9f6;
+    --ink:     #1a1a18;
+    --muted:   #6b6762;
+    --rule:    #ddd9d2;
+    --panel:   #ffffff;
+    --accent:  #8c2f1f;   /* the one colour that means "you must decide" */
+    --accent-soft: #f5ebe8;
+    --good:    #2d6a4a;
+    --code-bg: #f4f2ed;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #14140f; --ink: #ebe8e1; --muted: #9a958c; --rule: #332f28;
+      --panel: #1c1b16; --accent: #e0714f; --accent-soft: #2e1d17;
+      --good: #6fbf90; --code-bg: #121210;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #14140f; --ink: #ebe8e1; --muted: #9a958c; --rule: #332f28;
+    --panel: #1c1b16; --accent: #e0714f; --accent-soft: #2e1d17;
+    --good: #6fbf90; --code-bg: #121210;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 16px/1.6 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px 72px; }
+
+  header { border-bottom: 1px solid var(--rule); padding: 44px 0 28px; margin-bottom: 32px; }
+  h1 {
+    font: 600 clamp(28px, 4.2vw, 42px)/1.15 var(--serif);
+    margin: 0 0 14px; letter-spacing: -0.015em; text-wrap: balance;
+  }
+  h1 .quiet { color: var(--muted); font-weight: 400; }
+  .lede { font-size: 18px; max-width: 65ch; color: var(--ink); margin: 0 0 18px; }
+  .lede strong { color: var(--accent); font-weight: 600; }
+  .links { display: flex; flex-wrap: wrap; gap: 18px; font-size: 14px; }
+  .links a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--rule); }
+  .links a:hover, .links a:focus-visible { color: var(--accent); border-color: var(--accent); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 3px;
+    overflow: hidden;
+  }
+  .panel > h2 {
+    margin: 0; padding: 11px 14px; font: 600 11px/1 var(--sans);
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px solid var(--rule); background: var(--code-bg);
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  }
+
+  textarea {
+    width: 100%; min-height: 300px; border: 0; resize: vertical; display: block;
+    padding: 14px; font: 13px/1.65 var(--mono); tab-size: 4;
+    background: var(--panel); color: var(--ink);
+  }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 12px 14px; border-top: 1px solid var(--rule); background: var(--code-bg);
+  }
+  button {
+    font: 500 13px var(--sans); padding: 7px 15px; border-radius: 3px; cursor: pointer;
+    border: 1px solid var(--rule); background: var(--panel); color: var(--ink);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .examples { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 20px; }
+  .examples button { font-size: 12px; padding: 5px 11px; }
+  .examples button[aria-pressed="true"] {
+    background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
+  }
+
+  #out { padding: 0; min-height: 300px; }
+  pre {
+    margin: 0; padding: 14px; overflow-x: auto;
+    font: 13px/1.65 var(--mono); white-space: pre; tab-size: 4;
+  }
+  .status { font: 12px var(--mono); color: var(--muted); }
+  .status[data-state="ready"] { color: var(--good); }
+  .status[data-state="error"] { color: var(--accent); }
+
+  .finding { padding: 12px 14px; border-bottom: 1px solid var(--rule); }
+  .finding b { font-family: var(--mono); font-weight: 600; }
+  .tag {
+    display: inline-block; font: 600 10px/1 var(--mono); letter-spacing: 0.06em;
+    padding: 4px 7px; border-radius: 2px; text-transform: uppercase;
+    background: var(--accent-soft); color: var(--accent); margin-left: 6px;
+  }
+  .tag.advisory { background: var(--code-bg); color: var(--muted); }
+  .exit {
+    padding: 12px 14px; font: 13px var(--mono); border-top: 1px solid var(--rule);
+    background: var(--code-bg);
+  }
+  .exit b { color: var(--accent); }
+  .exit.clean b { color: var(--good); }
+
+  .ins { color: var(--good); }
+  .ctx { color: var(--muted); }
+
+  .note {
+    margin: 26px 0 0; padding: 16px 18px; border-left: 3px solid var(--rule);
+    font-size: 14px; color: var(--muted); max-width: 72ch;
+  }
+  .note strong { color: var(--ink); }
+  code { font: 0.92em var(--mono); background: var(--code-bg); padding: 1px 4px; border-radius: 2px; }
+  footer {
+    margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--rule);
+    font-size: 13px; color: var(--muted);
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>FinAgent-SafeGuard <span class="quiet">— try the linter</span></h1>
+  <p class="lede">
+    It finds the code that EU financial regulation applies to, names the
+    provisions you should read, and <strong>refuses to guess which one
+    applies</strong>. Paste Python below; it runs here, in your browser.
+  </p>
+  <nav class="links">
+    <a href="https://github.com/NaomiTitus/finagent-safeguard-sdk">Repository</a>
+    <a href="https://github.com/NaomiTitus/finagent-safeguard-sdk#readme">How it works</a>
+    <a href="https://github.com/NaomiTitus/finagent-safeguard-sdk/blob/main/docs/feature-measurement.md">The measurement</a>
+    <a href="https://github.com/NaomiTitus/finagent-safeguard-sdk/blob/main/docs/review-log.md">Review log</a>
+  </nav>
+</header>
+
+<div class="examples" id="examples" role="group" aria-label="Example inputs"></div>
+
+<div class="grid">
+  <section class="panel">
+    <h2>Your code <span class="status" id="boot" data-state="loading">booting…</span></h2>
+    <label for="src" class="visually-hidden" style="position:absolute;left:-9999px">Python source</label>
+    <textarea id="src" spellcheck="false" autocomplete="off"></textarea>
+    <div class="controls">
+      <button id="scan" class="primary" disabled>Scan</button>
+      <button id="fix" disabled>Show the edit (<code>--fix</code>)</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>What the linter says</h2>
+    <div id="out"><pre class="ctx">  Loading the real linter…</pre></div>
+  </section>
+</div>
+
+<p class="note">
+  <strong>This is the actual package</strong>, not a reimplementation — the same
+  <code>finagent_safeguard</code> that the test suite runs against, loaded into
+  Pyodide. That works because the SDK is standard&nbsp;library only, a decision
+  taken so a reviewer at a bank can read its dependencies; running in a browser
+  was never the reason. <code>tools/build_demo.py --check</code> fails the build
+  if what you see here drifts from what is tested.
+</p>
+
+<footer>
+  Nothing you paste leaves your browser — there is no server to send it to.
+  &nbsp;·&nbsp; <a href="https://github.com/NaomiTitus/finagent-safeguard-sdk">source</a>
+</footer>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

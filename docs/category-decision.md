@@ -1,7 +1,25 @@
 # How the category gets decided
 
-**Status:** method agreed, not yet built. Supersedes nothing; `_category_for` in
-`finagent_safeguard/cli/linter.py` is the thing being replaced.
+**Status:** **method agreed, then superseded by what measuring it revealed.**
+Steps 0-2 were built; steps 3-4 were not, and the reason is better than the
+plan.
+
+`_category_for` — the single-category guess this document set out to replace —
+is gone. `_vocabularies` replaced it, and `--fix` now writes `REVIEW_REQUIRED`
+rather than any category at all, which is a stronger answer than the one
+planned here: the tool stopped trying to decide.
+
+Steps 0-2 shipped as the hand-label corpus, the LLM annotator experiment and
+the classifier (`docs/llm-annotator-experiment.md`,
+`docs/feature-measurement.md`). Step 3's evidence sets and structural
+abstention, and step 4's authoring-time LLM, were not built — and
+leave-one-repository-out is why. It showed the binding constraint is **three
+scoreable folds**, not the method: a model that cannot be measured on more than
+three repositories cannot be shown to abstain correctly either. Reaching step 3
+needs more repositories before it needs more machinery.
+
+Read `README.md` for the current state. This file is kept for §1-§4, which are
+the measurement and the prior art, and both still hold.
 
 Three isolated agents were asked how to assign the regulatory category: one arguing
 deterministic static analysis, one arguing a learned model, one designing the evaluation.

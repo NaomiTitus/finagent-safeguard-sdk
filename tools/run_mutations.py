@@ -478,6 +478,51 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "honour a hand-set _regulated attribute",
     ),
 
+    "X1": (
+        LINT,
+        "        if pure.match(clean):",
+        "        if False:",
+        "test_a_pattern_is_anchored_at_the_right",
+        "stop matching the pattern itself, so --exclude only ever works via "
+        "the bare-directory convenience and a filename pattern silently "
+        "excludes nothing",
+    ),
+    "X2": (
+        LINT,
+        "    pure = PurePath(path.as_posix())",
+        "    import fnmatch as _f\n"
+        "    pure = PurePath(path.as_posix())\n"
+        "    if any(_f.fnmatch(path.as_posix(), q) for q in patterns):\n"
+        "        return True",
+        "test_a_pattern_does_not_match_across_a_directory_separator",
+        "go back to fnmatch, whose * crosses a directory separator. An "
+        "ancestor directory matching the pattern then excludes a developer's "
+        "whole tree, reported only as a count they have no reason to question",
+    ),
+    "X3": (
+        LINT,
+        '        summary += f" {skipped} file(s) excluded."',
+        "        pass",
+        "test_the_count_is_always_reported",
+        "stop reporting how many files were skipped. Everything --exclude "
+        "skips is simply not scanned, so a too-broad pattern becomes a green "
+        "build and the count is the only thing that would have said so",
+    ),
+    "X4": (
+        LINT,
+        "    if args.exclude and not skipped:",
+        "    if False:",
+        "test_a_pattern_matching_nothing_warns",
+        "drop the warning for a pattern that matches nothing -- the commonest "
+        "mistake, and one that makes a run look clean for the wrong reason",
+    ),
+    "X5": (
+        LINT,
+        "    if exclude:\n        found = [f for f in found if not _is_excluded(f, exclude)]",
+        "    if exclude:\n        found = [f for f in found if f.is_dir()]",
+        "test_without_exclude_everything_is_scanned",
+        "exclude every file whenever --exclude is given at all",
+    ),
     # ---- the approval guard (day 11) ------------------------------------
     # Layer 3 is a human confirming a classification, so the approved bytes
     # must be the written bytes. These rows protect the two independent checks
@@ -939,6 +984,11 @@ BASELINE: dict[str, str] = {
     "P7": "caught",
     "P8": "caught",
     "P9": "caught",
+    "X1": "caught",
+    "X2": "caught",
+    "X3": "caught",
+    "X4": "caught",
+    "X5": "caught",
 }
 
 

@@ -8,9 +8,15 @@ your Python with the `ast` module, and flags functions that handle money or
 personal data and can reach a bank client. It then names the provisions a
 developer should read, and **stops**.
 
+**[Try it in your browser →](https://naomititus.github.io/finagent-safeguard-sdk/)**
+— the real package, loaded into Pyodide. Paste any Python; nothing leaves your
+machine, because there is no server to send it to. That works because the SDK is
+standard-library only, a decision taken for auditability rather than for this.
+
 ```bash
 pip install -e .
 finagent-lint src/
+finagent-lint src/ --exclude 'tests/*'     # skip the noise; the count is reported
 ```
 
 ```
@@ -247,8 +253,18 @@ feature ranking:
 | `vocabulary` | −0.001 | +0.024 |
 | `verb` | +0.125 | +0.002 |
 
-The strongest group under one split was the worst under the other. Everything
-after that followed from changing the split, not the model:
+The strongest group under one split was the worst under the other.
+
+**The split itself improved nothing** — it lowered the apparent score and
+showed the earlier number was meaningless. Every gain below came from changing
+the **feature set**: two new groups added, three features removed. What the
+split contributed was the ability to tell which of those changes actually
+transferred, and under the old split three of the five would have been judged
+backwards.
+
+996 items, **213 positives** — which is what caps the feature count: at the
+usual ten events per variable, about twenty features is the ceiling before the
+model is fitting noise and reporting it as skill.
 
 | Feature set | LORO macro AUC |
 |---|---:|
@@ -258,6 +274,10 @@ after that followed from changing the split, not the model:
 | Plus `dataflow` and `docstring` groups | 0.774 |
 | Minus `pii_hits` (redundant with a feature derived from it) | 0.793 |
 | **Minus `risky_annotation` (harmful; one row in 996)** | **0.798** |
+
+Attributed honestly: **+0.222 of the +0.298 over baseline is the feature work**
+(`dataflow` alone is +0.104 of it), and the measurement change is what made that
+feature work possible to direct. Neither is the story on its own.
 
 `docs/feature-measurement.md` and `docs/embedding-experiment.md` have the
 mechanisms, the confidence intervals, and the corrections.
@@ -324,9 +344,9 @@ The part that is actually reusable, independent of the regulatory domain.
 
 | | |
 |---|---|
-| **441 tests** | including an adversarial bypass suite |
-| **93 mutation rows** | each one a single edit naming the test that must fail — `tools/run_mutations.py`, with 57 written up in `docs/mutation-list.md` |
-| **`mypy --strict`** | clean across 28 source files |
+| **468 tests** | including an adversarial bypass suite |
+| **99 mutation rows** | each one a single edit naming the test that must fail — `tools/run_mutations.py`, with 61 written up in `docs/mutation-list.md` |
+| **`mypy --strict`** | clean across 16 source files in the package, and across `tools/` |
 | **5 CI jobs** | 4 required on `main` |
 
 ```bash
@@ -335,14 +355,28 @@ python3 tools/battery.py --base origin/main
 
 Runs the review layers as one command: tests, both type-check passes, the
 mutation baseline, a **vacuity** suite (does any test actually assert
-anything?), and a **name-assertion** layer that fails if a new definition has no
-mutation row.
+anything?), a **name-assertion** layer that fails if a new definition has no
+mutation row, a **documented-claims** audit that checks every count and flag in
+this file against the code, and a **demo-bundle** check so the browser demo
+cannot show behaviour no test covers.
+
+The last two exist because of what a documentation pass found: four stale
+counts, a `--help` string describing an implementation replaced twenty minutes
+earlier, a plan document still claiming a Grafana dashboard that was never
+built, and two of five demo examples captioned with the opposite of what they
+do. Prose drifts from code inside a single session.
 
 A mutation nothing kills is a defect in the test suite, not in the code — and
-mutations that nothing killed are listed as such, in public, including **eight
-known holes** in `docs/mutation-list.md` — bypasses like `object.__new__` and
-`__qualname__` rebinding that a linter's threat model does not cover. Several of this project's real bugs
-were found by writing those rows rather than by running the code:
+mutations that nothing killed are listed as such, in public, including **nine
+known holes** in `docs/mutation-list.md`. Seven are runtime bypasses of the
+gate — `object.__new__`, `__qualname__` rebinding, a subclass that never calls
+`super()` — which are outside a linter's threat model of *error, not adversary*.
+The other two are not: one reports only the first unclassified tool rather than
+all of them, and one binds enforcement in a way a subclass can override. Both
+are real, and listed rather than argued away.
+
+Several of this project's real bugs were found by writing those rows rather than
+by running the code:
 
 - `fit()` returned **NaN weights** for a large `l2`. Every comparison against
   NaN is false, so the model did not score *badly* — it scored **unorderably**,
@@ -356,6 +390,8 @@ were found by writing those rows rather than by running the code:
 ## Layout
 
 ```
+docs/index.html        the browser demo: the real package, via Pyodide
+docs/demo-bundle.json  generated by tools/build_demo.py, gated by --check
 finagent_safeguard/
   cli/linter.py        the AST rule, --fix, the --since ratchet, 5 write guards
   cli/features.py      21 features produced, 15 fitted; exclusions declared
@@ -388,6 +424,13 @@ it claims to solve.
   never that it is correct. `Obligation` and its addressee/enforcement fields are
   built and tested with **no instances** — the obligation engine is the next
   layer, not a shipped one.
+- **`--exclude` is an adoption aid, not a boundary.** Everything it skips is
+  simply not scanned, so a too-broad pattern produces a quiet pass. The number
+  excluded is always printed and a pattern matching nothing warns, which is the
+  most the tool can honestly do about it. Patterns match from the right by path
+  component (`PurePath.match`), and `*` does not cross a `/` — the first
+  implementation used `fnmatch`, where it did, and an ancestor directory named
+  `test_project` was enough to exclude a whole tree.
 - **`--check` does not detect a changed claim**, only a changed rubric or corpus.
 
 ## Next: the obligation engine
@@ -431,9 +474,17 @@ it later would not be.
 ### Also next
 
 - More repositories in the corpus.
-- More repositories in the corpus. At three scoreable folds, more
-  repositories are worth more than more features — one result in sixteen is
-  already spurious by chance.
+- **Three new repositories, not more items from these.** Only three of six
+  leave-one-out folds are scoreable, and that is a property of the corpus
+  rather than of the sample size: `cpython-stdlib` has a **0%** positive rate
+  because the standard library contains no payment code; `schwifty` has 1%
+  because it is an IBAN *validator*, so its functions check rather than handle;
+  and `pyiso20022` is **exhausted** — all 66 of its functions are already
+  harvested. Scoring six folds needs three further repositories with positive
+  rates above roughly 10%, and at three scoreable folds that matters more than
+  any new feature: one result in sixteen is already spurious by chance.
+- **`--check` should detect a changed claim**, not only a changed rubric or
+  corpus. Today a reworded obligation whose citation still resolves passes.
 - Precision at fixed coverage with explicit abstention, the Typilus framing
   (arXiv 2004.10657), once there are enough folds to estimate it.
 - The similarity-to-exemplars embedding form (3 features, +0.030) — the one
