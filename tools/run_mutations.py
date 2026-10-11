@@ -23,6 +23,8 @@ DECOR = "finagent_safeguard/core/decorators.py"
 REGIS = "finagent_safeguard/regulation/registry.py"
 LINT = "finagent_safeguard/cli/linter.py"
 CAND = "finagent_safeguard/regulation/candidates.py"
+FEAT = "finagent_safeguard/cli/features.py"
+CLAS = "finagent_safeguard/cli/classifier.py"
 
 # id: (file, find, replace, expected killer, note)
 MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
@@ -462,6 +464,243 @@ MUTATIONS: dict[str, tuple[str, str, str, str, str]] = {
         "test_attribute_spoofing_does_not_satisfy_the_gate",
         "honour a hand-set _regulated attribute",
     ),
+
+    # ---- finagent_safeguard/cli/features.py -----------------------------
+    # The feature module is advisory research code rather than a guard: no
+    # mutation here can mislabel a function, because nothing in the write path
+    # reads a feature. What these rows protect is the *claim each feature's
+    # name makes*. The project has already shipped a feature that fired
+    # backwards (F8) and one whose name promised data flow while it measured
+    # length, and both looked fine in aggregate -- so "the model still scores
+    # about the same" is not evidence a feature works.
+    "F1": (
+        FEAT,
+        '"transfer", "pay", "charge", "capture", "refund", "settle", "execute",',
+        '"pay", "charge", "capture", "refund", "settle", "execute",',
+        "test_an_action_verb_is_recognised",
+        "drop the clearest action verb from the action list",
+    ),
+    "F2": (
+        FEAT,
+        '    "get", "fetch", "list", "retrieve", "search", "find", "read", "load",',
+        '    "fetch", "list", "retrieve", "search", "find", "read", "load",',
+        "test_a_query_verb_is_recognised",
+        "drop the commonest read verb, making every getter verbless",
+    ),
+    "F3": (
+        FEAT,
+        '    "validate", "check", "verify", "assert", "compute", "calculate", "is",',
+        '    "check", "verify", "assert", "compute", "calculate", "is",',
+        "test_a_check_verb_is_recognised",
+        "drop 'validate', the verb behind the validating-is-not-producing rule",
+    ),
+    "F4": (
+        FEAT,
+        '    ".to_excel", ".to_csv", ".to_json", ".to_sql", ".write", ".writelines",',
+        '    ".to_csv", ".to_json", ".to_sql", ".write", ".writelines",',
+        "test_a_write_call_is_a_sink",
+        "stop treating a spreadsheet write as a sink",
+    ),
+    "F5": (
+        FEAT,
+        '    "mock", "Mock", "stub_request", "assert_requested", "patch(", "fixture",',
+        '    "stub_request", "patch(", "fixture",',
+        "test_a_mocked_transport_is_detected",
+        "stop recognising a mocked transport, so test doubles read as real sinks",
+    ),
+    "F6": (
+        FEAT,
+        "'\"name\"', \"'name'\"",
+        "'\"nome\"', \"'nome'\"",
+        "test_a_party_key_literal_is_detected",
+        "misspell the commonest party-key literal",
+    ),
+    "F7": (
+        FEAT,
+        '        "name", "fullname", "full_name", "holder", "account_holder",',
+        '        "fullname", "full_name", "holder", "account_holder",',
+        "test_reading_a_party_name_out_of_a_mapping_is_sensitive",
+        "remove 'name' from SENSITIVE_KEYS -- the exact gap in PII_TOKENS that "
+        "made the old party_key feature unable to fire on self._config['name']",
+    ),
+    "F8": (
+        FEAT,
+        "            if isinstance(child.ctx, ast.Load) and isinstance(child.slice.value, str):",
+        "            if isinstance(child.slice.value, str):",
+        "test_writing_into_a_slot_named_for_a_party_is_not",
+        "count subscript *writes* as sensitive reads. This is the bug the "
+        "feature actually shipped with: it made the blank-node builder outscore "
+        "the function that reads a real party name, i.e. the feature fired "
+        "backwards while the aggregate numbers still looked plausible",
+    ),
+    "F9": (
+        FEAT,
+        "            hits.add(key.lower())",
+        "            hits.add(f\"{key.lower()}{total}\")",
+        "test_distinct_keys_are_counted_not_repeated_reads",
+        "count repeated reads of one key as distinct keys, so a loop over a "
+        "single field outranks a body touching three",
+    ),
+    "F10": (
+        FEAT,
+        '            and child.func.attr == "get"',
+        '            and child.func.attr == "__never__"',
+        "test_a_mapping_read_through_get_also_counts",
+        "see only x['k'] and not x.get('k'), which measures house style rather "
+        "than what the function reads",
+    ),
+    "F11": (
+        FEAT,
+        "    return float(min(len(hits), 6)), float(min(total, 10))",
+        "    return float(len(hits)), float(total)",
+        "test_the_counts_are_capped",
+        "remove the caps, letting one outlier dominate a standardised feature",
+    ),
+    "F12": (
+        FEAT,
+        "        if name and (\n"
+        "            _matches_tokens(name, MONEY_TOKENS) or _matches_tokens(name, PII_TOKENS)\n"
+        "        ):",
+        "        if name:",
+        "test_a_callee_named_generically_does_not",
+        "fire on any call at all, turning a vocabulary check into a 'has calls' "
+        "feature that every non-trivial function satisfies",
+    ),
+    "F13": (
+        FEAT,
+        "    if not text:\n        return 0.0, 0.0",
+        "    if not text:\n        return 0.0, 1.0",
+        "test_a_missing_docstring_scores_zero_rather_than_disclaiming",
+        "read an absent docstring as a disclaimer, marking most of the corpus "
+        "safe by default. Absent and denied are different states",
+    ),
+    "F14": (
+        FEAT,
+        'for word in ("blank", "empty", "placeholder", "stub", "no-op", "noop",',
+        'for word in ("empty", "placeholder", "stub", "no-op", "noop",',
+        "test_a_disclaimer_is_detected",
+        "drop 'blank' -- the single word by which the corpus's hardest negative "
+        "announces that it does not do the thing",
+    ),
+    "F15": (
+        FEAT,
+        "    for part in ordered:",
+        "    for part in ordered[:1]:",
+        "test_a_private_class_prefixed_verb_is_still_found",
+        "take literally the first word, so every _cls_-prefixed method is verbless",
+    ),
+    "F16": (
+        FEAT,
+        '        "sensitive_subscripts": sensitive_subscripts,',
+        '        "sensitive_subscripts_": sensitive_subscripts,',
+        "test_extract_returns_the_declared_set",
+        "produce a feature under a name the model does not know, which reads as "
+        "a missing key at scan time",
+    ),
+    "F17": (
+        FEAT,
+        '    "dataflow": ("sensitive_subscripts", "subscript_total", "callee_vocabulary"),',
+        '    "dataflow": ("subscript_total", "callee_vocabulary"),',
+        "test_extract_returns_the_declared_set",
+        "declare one fewer feature than extract produces, so the model silently "
+        "ignores the group's strongest signal",
+    ),
+    "F18": (
+        FEAT,
+        "FEATURE_NAMES: Final[tuple[str, ...]] = tuple(\n"
+        "    name for group in FEATURE_GROUPS.values() for name in group\n"
+        ")",
+        'FEATURE_NAMES: Final[tuple[str, ...]] = FEATURE_GROUPS["vocabulary"]',
+        "test_extract_returns_the_declared_set",
+        "pin the declared set to one group, so adding a feature group has no effect",
+    ),
+    "F19": (
+        FEAT,
+        'EXCLUDED_GROUPS: Final[tuple[str, ...]] = ("literal",)',
+        "EXCLUDED_GROUPS: Final[tuple[str, ...]] = ()",
+        "test_the_harmful_group_is_not_fitted",
+        "refit the literal group, which measured -0.069 LORO AUC. It was the "
+        "strongest group under a stratified split (+0.172) and the worst under "
+        "leave-one-repository-out, so refitting it silently undoes the finding "
+        "the whole exercise exists to establish",
+    ),
+    "F20": (
+        FEAT,
+        "MODEL_FEATURES: Final[tuple[str, ...]] = tuple(\n"
+        "    name\n"
+        "    for group, members in FEATURE_GROUPS.items()\n"
+        "    if group not in EXCLUDED_GROUPS\n"
+        "    for name in members\n"
+        ")",
+        "MODEL_FEATURES: Final[tuple[str, ...]] = FEATURE_NAMES",
+        "test_the_harmful_group_is_not_fitted",
+        "fit on everything extract produces, ignoring the exclusion entirely",
+    ),
+    # ---- finagent_safeguard/cli/classifier.py ---------------------------
+    # Same standing: the classifier ranks a review queue, it does not gate.
+    # These rows protect the three ways a stored model can be silently wrong
+    # and the one way the fit can silently stop being a ranker at all (C6).
+    "M1": (
+        CLAS,
+        "    if z >= 0.0:\n        return 1.0 / (1.0 + math.exp(-z))\n"
+        "    e = math.exp(z)\n    return e / (1.0 + e)",
+        "    return 1.0 / (1.0 + math.exp(-z))",
+        "test_a_confident_margin_does_not_overflow",
+        "collapse the sign branch to the naive form. The first version of this "
+        "row mutated the +/-500 clamps instead and SURVIVED, which is how the "
+        "clamps were found to be dead code: the branch was always the mechanism",
+    ),
+    "M2": (
+        CLAS,
+        "        missing = set(self.feature_names) - set(features)\n"
+        "        if missing:\n"
+        "            raise ValueError(f\"missing features: {sorted(missing)}\")",
+        "        features = {**{n: 0.0 for n in self.feature_names}, **features}",
+        "test_a_missing_feature_is_refused_not_read_as_zero",
+        "default a missing feature to zero, producing a plausible score from an "
+        "incomplete row",
+    ),
+    "M3": (
+        CLAS,
+        "        if names != MODEL_FEATURES:",
+        "        if False:",
+        "test_a_model_fitted_on_other_features_is_refused",
+        "accept a model fitted on a different feature set. Every score is still "
+        "produced, just wrongly, because a renamed feature reads as an absent one",
+    ),
+    "M4": (
+        CLAS,
+        '                "provenance": self.provenance,',
+        "",
+        "test_provenance_travels_with_the_artefact",
+        "drop provenance from the serialised model, so the artefact outlives the "
+        "record of how it was fitted",
+    ),
+    "M5": (
+        CLAS,
+        "        b -= rate * bias_gradient / n",
+        "        b -= rate * (bias_gradient / n + l2 * b / n)",
+        "test_the_intercept_learns_the_base_rate",
+        "regularise the intercept, shrinking the model's estimate of the base "
+        "rate towards zero when the base rate is a real quantity",
+    ),
+    "M6": (
+        CLAS,
+        "    if not finite:",
+        "    if False:",
+        "test_a_diverged_fit_is_refused_rather_than_returning_nan",
+        "let a diverged fit return NaN weights. Every comparison against NaN is "
+        "False, so the model does not score badly -- it scores unorderably, "
+        "ranking the queue at random while returning a float for every row",
+    ),
+    "M7": (
+        CLAS,
+        "        spreads[k] = math.sqrt(variance) or 1.0",
+        "        spreads[k] = math.sqrt(variance)",
+        "test_a_constant_feature_still_yields_a_finite_score",
+        "divide by a zero spread. A feature that never varies is routine in a "
+        "leave-one-repository-out fold, not exotic",
+    ),
 }
 
 
@@ -531,6 +770,37 @@ BASELINE: dict[str, str] = {
     "D4": "caught",
     "D5": "caught",
     "D6": "caught",
+    # features.py and classifier.py, added with the dataflow and docstring
+    # groups. All verified caught by the test each row names; see
+    # docs/mutation-list.md for the three that were not, on first run, and
+    # what each survival turned out to mean.
+    "F1": "caught",
+    "F2": "caught",
+    "F3": "caught",
+    "F4": "caught",
+    "F5": "caught",
+    "F6": "caught",
+    "F7": "caught",
+    "F8": "caught",
+    "F9": "caught",
+    "F10": "caught",
+    "F11": "caught",
+    "F12": "caught",
+    "F13": "caught",
+    "F14": "caught",
+    "F15": "caught",
+    "F16": "caught",
+    "F17": "caught",
+    "F18": "caught",
+    "F19": "caught",
+    "F20": "caught",
+    "M1": "caught",
+    "M2": "caught",
+    "M3": "caught",
+    "M4": "caught",
+    "M5": "caught",
+    "M6": "caught",
+    "M7": "caught",
 }
 
 
