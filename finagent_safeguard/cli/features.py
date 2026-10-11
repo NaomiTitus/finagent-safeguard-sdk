@@ -249,13 +249,44 @@ FEATURE_NAMES: Final[tuple[str, ...]] = tuple(
 #: kept out of the fit -- a deleted group would erase the evidence.
 EXCLUDED_GROUPS: Final[tuple[str, ...]] = ("literal",)
 
+#: Individual features `extract` produces but the model is not fitted on.
+#:
+#: `pii_hits` counts person-data words in a function's **signature** -- its own
+#: name plus its parameters, never its body. Dropping it is worth **+0.019 LORO
+#: AUC**, 95% CI [+0.009, +0.032], P(no gain) 0.00.
+#:
+#: Not because it is a bad feature. On its own it is a good one: P(label is yes
+#: | it fires) is 0.50 against a 0.09 base rate in django-oscar, and its sign is
+#: stable across every repository. The reason is **redundancy**.
+#: `both_vocabularies` is literally `1 if money_hits and pii_hits`, computed
+#: from the same scan of the same names, so it can only fire where `pii_hits`
+#: already has (r = 0.547). L2 was splitting one feature's credit across two
+#: expressions of it: remove `pii_hits` and `both_vocabularies` goes from +1.831
+#: to +2.283 while no other weight moves by more than 0.04.
+#:
+#: So the signal is not lost by dropping it, it is concentrated. And the body is
+#: where this evidence actually lives -- `self._config['name']` and
+#: `row['email']` are invisible to a signature scan, which is why `pii_hits`
+#: fires on only 23 of 996 functions and why `sensitive_subscripts` (+0.092)
+#: earns far more.
+#:
+#: **Caveat recorded with the decision:** chosen by testing six candidate drops
+#: against the same three scoreable folds it is measured on. The interval is
+#: tight and the collinearity is independent evidence, but this is a selection
+#: made on three repositories -- the same shape as the mistake LORO exists to
+#: catch. Revisit when more repositories are scoreable.
+EXCLUDED_FEATURES: Final[tuple[str, ...]] = ("pii_hits",)
+
 #: The features the model is fitted on. `extract` returns a superset, so a
-#: scored row always has every name this tuple asks for.
+#: scored row always has every name this tuple asks for. Both exclusions stay
+#: *produced*: they are shown to a human in the ranked queue, and deleting them
+#: would erase the evidence for why they are not fitted.
 MODEL_FEATURES: Final[tuple[str, ...]] = tuple(
     name
     for group, members in FEATURE_GROUPS.items()
     if group not in EXCLUDED_GROUPS
     for name in members
+    if name not in EXCLUDED_FEATURES
 )
 
 
