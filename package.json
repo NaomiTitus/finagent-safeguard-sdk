@@ -1,0 +1,13 @@
+{
+  "name": "finagent-safeguard-demo-smoke",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Test-only. The SDK is Python and has no runtime dependencies; this exists so tools/smoke_demo.mjs can run the browser demo headlessly under the same Pyodide version the page pins. Nothing here ships.",
+  "type": "module",
+  "scripts": {
+    "smoke": "node tools/smoke_demo.mjs"
+  },
+  "devDependencies": {
+    "pyodide": "0.26.4"
+  }
+}

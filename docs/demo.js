@@ -118,14 +118,22 @@ async function init() {
 
     setStatus('loading the linter…', 'loading');
     const bundle = await (await fetch('demo-bundle.json')).json();
-    // Written into the virtual filesystem under the package's real layout, so
-    // the imports in the source resolve exactly as they do on disk.
+
+    // Absolute paths, and an explicit root on sys.path.
+    //
+    // The first version wrote the bundle to relative paths and put "" on
+    // sys.path. It failed with ErrnoError 44 (ENOENT) before any Python ran:
+    // emscripten's FS does not resolve a relative path the way the shell does,
+    // so mkdirTree('finagent_safeguard/cli') had nothing to hang from. The
+    // page loaded, showed "loading the linter…", and stopped there.
+    const ROOT = '/pkg';
+    pyodide.FS.mkdirTree(ROOT);
     for (const [path, text] of Object.entries(bundle)) {
-      const dir = path.slice(0, path.lastIndexOf('/'));
-      pyodide.FS.mkdirTree(dir);
-      pyodide.FS.writeFile(path, text);
+      const full = `${ROOT}/${path}`;
+      pyodide.FS.mkdirTree(full.slice(0, full.lastIndexOf('/')));
+      pyodide.FS.writeFile(full, text);
     }
-    pyodide.runPython(`import sys; sys.path.insert(0, "")`);
+    pyodide.runPython(`import sys; sys.path.insert(0, "${ROOT}")`);
     pyodide.runPython(`
 from pathlib import Path
 from finagent_safeguard.cli.linter import (

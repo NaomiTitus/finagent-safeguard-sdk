@@ -160,6 +160,15 @@ def main(argv: list[str] | None = None) -> int:
         # which is worse than having no demo, because it carries the
         # repository's name.
         _run("layer 1e: demo bundle", [sys.executable, "tools/build_demo.py", "--check"]),
+        # Skipped rather than failed when node or the pyodide package is
+        # absent: the SDK is Python and a contributor without node should not
+        # see a red battery for a demo they are not touching. CI always has it.
+        *(
+            [_run("layer 1f: the demo runs", ["node", "tools/smoke_demo.mjs"])]
+            if (ROOT / "node_modules" / "pyodide").exists()
+            else [("layer 1f: the demo runs", True,
+                   "skipped: npm install first (node_modules/pyodide absent)")]
+        ),
     ]
 
     print("-" * 70)

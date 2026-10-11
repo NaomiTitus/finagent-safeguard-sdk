@@ -19,3 +19,7 @@ benchmark/worksheet.md
 
 # Labelling app build: inlines third-party source, regenerated from pointers
 benchmark/.app/
+
+# Test-only: pyodide, for the headless demo smoke test (see package.json)
+node_modules/
+package-lock.json

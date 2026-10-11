@@ -49,6 +49,16 @@ jobs:
       # bundle shows behaviour no test covers, under the repository's name.
       - name: Demo bundle is current
         run: python tools/build_demo.py --check
+      # The demo shipped broken: every Python test passed because the failure
+      # was in the glue between JavaScript and Pyodide, which no Python test
+      # executes. This runs the glue, headlessly, against the Pyodide version
+      # the page pins.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - name: The browser demo actually runs
+        run: node tools/smoke_demo.mjs
 
   # Layer 1a of the review protocol, enforced. Each curated mutation must match its
   # recorded status; a mutation drifting from caught to not-caught fails the build.
