@@ -1,0 +1,180 @@
+{"flagged": false, "item_id": "cpython-stdlib:000", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:001", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:002", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:003", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:004", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:005", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:006", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:007", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:008", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:009", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:010", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:011", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:012", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:013", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:014", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:015", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:016", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:017", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:018", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:019", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:020", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:021", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:022", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:023", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:024", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:025", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:026", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:027", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:028", "pass": 1, "regulated": false}
+{"flagged": true, "item_id": "cpython-stdlib:029", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:030", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:031", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:032", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:033", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "cpython-stdlib:034", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:000", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:001", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:002", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:003", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:004", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:005", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:006", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:007", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:008", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:009", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:010", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:011", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:012", "pass": 1, "regulated": false}
+{"flagged": true, "item_id": "django-oscar:013", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "django-oscar:014", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:015", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:016", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "django-oscar:017", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:018", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:019", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "django-oscar:020", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:021", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:022", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:023", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:024", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:025", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:026", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:027", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "django-oscar:028", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "django-oscar:029", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:000", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:001", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:002", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:003", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "pyiso20022:004", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:005", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "pyiso20022:006", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:007", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:008", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:009", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:010", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:011", "pass": 1, "regulated": false}
+{"flagged": true, "item_id": "pyiso20022:012", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:013", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:014", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:015", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "pyiso20022:016", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:017", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:018", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:019", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:020", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:021", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:022", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:023", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "pyiso20022:024", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "python-sepaxml:000", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:001", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "python-sepaxml:002", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:003", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:004", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:005", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:006", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:007", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:008", "pass": 1, "regulated": true}
+{"flagged": true, "item_id": "python-sepaxml:009", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:010", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:011", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:012", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:013", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "python-sepaxml:014", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:015", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:016", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:017", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "python-sepaxml:018", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "python-sepaxml:019", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:000", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:001", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:002", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:003", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:004", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:005", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:006", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:007", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "schwifty:008", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:009", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:010", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:011", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:012", "pass": 1, "regulated": false}
+{"flagged": true, "item_id": "schwifty:013", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "schwifty:014", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:015", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:016", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:017", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:018", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "schwifty:019", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:000", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:001", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:002", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:003", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:004", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:005", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "stripe-python:006", "pass": 1, "regulated": false}
+{"flagged": true, "item_id": "stripe-python:007", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "stripe-python:008", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:009", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "stripe-python:010", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "stripe-python:011", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:012", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:013", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:014", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:015", "pass": 1, "regulated": false}
+{"flagged": true, "item_id": "stripe-python:016", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "stripe-python:017", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:018", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:019", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "stripe-python:020", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "stripe-python:021", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:022", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:023", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "stripe-python:024", "pass": 1, "regulated": false}
+{"flagged": true, "item_id": "stripe-python:025", "pass": 1, "regulated": true}
+{"flagged": false, "item_id": "stripe-python:026", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:027", "pass": 1, "regulated": false}
+{"flagged": false, "item_id": "stripe-python:028", "pass": 1, "regulated": false}
+{"flagged": true, "item_id": "stripe-python:029", "pass": 1, "regulated": true}
+{"item_id": "cpython-stdlib:000", "pass": 2, "regulated": false}
+{"item_id": "cpython-stdlib:001", "pass": 2, "regulated": false}
+{"item_id": "cpython-stdlib:013", "pass": 2, "regulated": false}
+{"item_id": "cpython-stdlib:019", "pass": 2, "regulated": false}
+{"item_id": "cpython-stdlib:022", "pass": 2, "regulated": false}
+{"item_id": "cpython-stdlib:028", "pass": 2, "regulated": false}
+{"item_id": "cpython-stdlib:029", "pass": 2, "regulated": true}
+{"item_id": "django-oscar:003", "pass": 2, "regulated": false}
+{"item_id": "django-oscar:028", "pass": 2, "regulated": false}
+{"item_id": "django-oscar:029", "pass": 2, "regulated": false}
+{"item_id": "pyiso20022:000", "pass": 2, "regulated": false}
+{"item_id": "pyiso20022:015", "pass": 2, "regulated": true}
+{"item_id": "python-sepaxml:001", "pass": 2, "regulated": false}
+{"item_id": "python-sepaxml:004", "pass": 2, "regulated": true}
+{"item_id": "python-sepaxml:005", "pass": 2, "regulated": true}
+{"item_id": "python-sepaxml:009", "pass": 2, "regulated": false}
+{"item_id": "python-sepaxml:012", "pass": 2, "regulated": true}
+{"item_id": "schwifty:000", "pass": 2, "regulated": false}
+{"item_id": "schwifty:006", "pass": 2, "regulated": false}
+{"item_id": "stripe-python:019", "pass": 2, "regulated": true}
