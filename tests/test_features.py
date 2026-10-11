@@ -10,7 +10,13 @@ from __future__ import annotations
 
 import ast
 
-from finagent_safeguard.cli.features import FEATURE_NAMES, extract
+from finagent_safeguard.cli.features import (
+    EXCLUDED_GROUPS,
+    FEATURE_GROUPS,
+    FEATURE_NAMES,
+    MODEL_FEATURES,
+    extract,
+)
 
 
 def _one(source: str) -> dict[str, float]:
@@ -50,14 +56,39 @@ class TestTheCanonicalHardPair:
         for name in ("action_verb", "party_key", "no_params", "private"):
             assert writes[name] == blank[name], name
 
-    def test_which_is_why_a_data_flow_feature_is_needed(self) -> None:
-        """Documented as a failing property rather than a passing one: the
-        difference is an assignment of a non-constant value into a sensitive
-        field, and no current feature inspects assignments."""
+    def test_the_data_flow_feature_now_separates_them(self) -> None:
+        """This test used to assert the *gap* -- that nothing could tell the
+        pair apart. It is kept, inverted, because closing that gap is the only
+        job the dataflow group was added to do, so a regression here means the
+        group has stopped earning its place.
+
+        The separation is asserted on `sensitive_subscripts` specifically.
+        `body_lines` and `string_literals` also differ between these two, and
+        they differ for the wrong reason -- one function is longer -- which is
+        the confounder this whole exercise exists to remove.
+        """
         writes, blank = _one(self.WRITES), _one(self.BLANK)
-        differing = [n for n in FEATURE_NAMES if writes[n] != blank[n]]
-        assert differing in ([], ["body_lines"], ["string_literals"],
-                             ["body_lines", "string_literals"]), differing
+        assert writes["sensitive_subscripts"] > blank["sensitive_subscripts"]
+
+    def test_and_the_docstrings_separate_them_independently(self) -> None:
+        """A second signal on the same pair, reading different evidence.
+
+        Two features that fire on the same evidence are one feature. These do
+        not: one reads the body's subscripts, the other reads prose the body
+        does not contain.
+        """
+        writes = _one(
+            "def _create_header(self):\n"
+            "    'Create the GrpHdr node with the initiating party.'\n"
+            "    Nm_node.text = self._config['name']\n"
+        )
+        blank = _one(
+            "def _create_PmtInf_node(self):\n"
+            "    'Create the blank payment information nodes.'\n"
+            "    return dict()\n"
+        )
+        assert writes["docstring_disclaims"] == 0.0
+        assert blank["docstring_disclaims"] == 1.0
 
 
 class TestVerbClass:
@@ -112,6 +143,51 @@ class TestSinkAndMock:
         assert got["mocked"] == 1.0
 
 
+class TestPartyKeyLiteral:
+    """The `literal` group is excluded from the fitted model -- it was measured
+    at -0.069 LORO AUC, i.e. actively harmful, because it tracks house style.
+    It is still produced and still tested: it is reported to a human in the
+    ranked queue, and an untested feature is one nobody can argue with.
+    """
+
+    def test_a_party_key_literal_is_detected(self) -> None:
+        got = _one("def f(self):\n    node.text = row['name']\n")
+        assert got["party_key"] == 1.0
+
+    def test_a_body_with_no_party_literal_does_not_fire(self) -> None:
+        got = _one("def f(self):\n    node.text = row['total']\n")
+        assert got["party_key"] == 0.0
+
+
+class TestTheFittedSet:
+    """`extract` produces 21 features; the model is fitted on 17.
+
+    The gap is a measured decision, not an oversight, so it is pinned. The
+    `literal` group scored **-0.069 LORO AUC** -- actively harmful, because it
+    counts length and punctuation and so learns which repository a function
+    came from. Under a stratified split it looked like the strongest group of
+    all (+0.172). Silently refitting it would undo the finding that the whole
+    leave-one-repository-out exercise exists to establish.
+    """
+
+    def test_the_harmful_group_is_not_fitted(self) -> None:
+        assert set(MODEL_FEATURES).isdisjoint(FEATURE_GROUPS["literal"])
+
+    def test_every_fitted_feature_is_still_produced(self) -> None:
+        """A fitted name `extract` does not produce would raise at scan time
+        on every single function, so this is the cheap end of that failure."""
+        assert set(MODEL_FEATURES) <= set(FEATURE_NAMES)
+
+    def test_the_exclusion_is_declared_rather_than_implied(self) -> None:
+        """Naming the excluded group keeps the reason discoverable. An
+        exclusion expressed only as a hard-coded tuple of 17 names would be
+        indistinguishable from someone having forgotten four.
+        """
+        assert EXCLUDED_GROUPS
+        for group in EXCLUDED_GROUPS:
+            assert group in FEATURE_GROUPS
+
+
 class TestEveryFeatureIsProduced:
     def test_extract_returns_the_declared_set(self) -> None:
         """A feature named in FEATURE_NAMES but not produced would be read as
@@ -127,3 +203,106 @@ class TestEveryFeatureIsProduced:
         for name, value in got.items():
             assert isinstance(value, float), name
             assert math.isfinite(value), name
+
+
+class TestDataFlow:
+    """The group that carried the largest transferable gain: +0.092 LORO AUC.
+
+    Every assertion here is about *which key is read for its value*, because
+    that is the claim the group's name makes and the one it was measured on.
+    """
+
+    def test_reading_a_party_name_out_of_a_mapping_is_sensitive(self) -> None:
+        got = _one("def f(self):\n    return self._config['name']\n")
+        assert got["sensitive_subscripts"] == 1.0
+
+    def test_writing_into_a_slot_named_for_a_party_is_not(self) -> None:
+        """The bug this feature shipped with, pinned so it cannot return.
+
+        ``ED['name'] = ET.Element('Nm')`` names a slot in a local dictionary;
+        nothing sensitive is read. Counting stores made the blank-node builder
+        outscore the function that reads a real name -- the feature firing
+        backwards while still looking plausible in aggregate.
+        """
+        got = _one(
+            "def f(self):\n"
+            "    ED = dict()\n"
+            "    ED['name'] = ET.Element('Nm')\n"
+            "    return ED\n"
+        )
+        assert got["sensitive_subscripts"] == 0.0
+
+    def test_a_mapping_read_through_get_also_counts(self) -> None:
+        """Much of the corpus reads mappings with ``.get``. A feature seeing
+        only ``[...]`` would be measuring house style again."""
+        got = _one("def f(self):\n    return self._row.get('iban')\n")
+        assert got["sensitive_subscripts"] == 1.0
+
+    def test_an_insensitive_key_is_counted_only_in_the_total(self) -> None:
+        got = _one("def f(self):\n    return self._config.get('domestic', False)\n")
+        assert got["sensitive_subscripts"] == 0.0
+        assert got["subscript_total"] == 1.0
+
+    def test_distinct_keys_are_counted_not_repeated_reads(self) -> None:
+        """Reading one key three times is one fact about the function, so a
+        loop over a single key must not outrank a body touching three."""
+        repeated = _one(
+            "def f(self):\n"
+            "    a = self._c['iban']\n"
+            "    b = self._c['iban']\n"
+            "    c = self._c['iban']\n"
+        )
+        varied = _one(
+            "def g(self):\n"
+            "    a = self._c['iban']\n"
+            "    b = self._c['debtor']\n"
+            "    c = self._c['amount']\n"
+        )
+        assert repeated["sensitive_subscripts"] == 1.0
+        assert varied["sensitive_subscripts"] == 3.0
+
+    def test_a_non_string_subscript_is_ignored(self) -> None:
+        """``rows[0]`` and ``rows[i]`` are indexing, not key access."""
+        got = _one("def f(rows, i):\n    return rows[0], rows[i]\n")
+        assert got["subscript_total"] == 0.0
+
+    def test_a_callee_named_in_domain_vocabulary_fires(self) -> None:
+        got = _one("def f(self):\n    self.add_payment(x)\n")
+        assert got["callee_vocabulary"] == 1.0
+
+    def test_a_callee_named_generically_does_not(self) -> None:
+        """The feature must stay a vocabulary check. A specific library's
+        method name as a literal target would encode repository identity,
+        which is what leave-one-repository-out exists to punish."""
+        got = _one("def f(self):\n    self.append(x)\n    helper(y)\n")
+        assert got["callee_vocabulary"] == 0.0
+
+    def test_the_counts_are_capped(self) -> None:
+        """Unbounded counts let one outlier dominate a standardised feature."""
+        body = "".join(f"    x{i} = self._c['iban']\n" for i in range(40))
+        got = _one("def f(self):\n" + body)
+        assert got["subscript_total"] == 10.0
+
+
+class TestDocstringIntent:
+    def test_intent_words_are_counted(self) -> None:
+        got = _one("def f():\n    'Transfer the payment amount.'\n")
+        assert got["docstring_intent"] >= 2.0
+
+    def test_a_missing_docstring_scores_zero_rather_than_disclaiming(self) -> None:
+        """Absent and denied are different states. Reading no docstring as a
+        disclaimer would mark most of the corpus as safe by default."""
+        got = _one("def f():\n    pass\n")
+        assert got["docstring_intent"] == 0.0
+        assert got["docstring_disclaims"] == 0.0
+
+    def test_a_disclaimer_is_detected(self) -> None:
+        got = _one("def f():\n    'Create the blank nodes.'\n")
+        assert got["docstring_disclaims"] == 1.0
+
+    def test_intent_and_disclaiming_are_independent(self) -> None:
+        """A docstring can be full of domain words and still say it does
+        nothing with them. That is precisely the hard negative."""
+        got = _one("def f():\n    'Create blank payment account nodes.'\n")
+        assert got["docstring_intent"] >= 2.0
+        assert got["docstring_disclaims"] == 1.0

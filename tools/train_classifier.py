@@ -43,8 +43,10 @@ if str(ROOT) not in sys.path:
 
 from finagent_safeguard.cli.classifier import Model, fit  # noqa: E402
 from finagent_safeguard.cli.features import (  # noqa: E402
+    EXCLUDED_GROUPS,
     FEATURE_GROUPS,
     FEATURE_NAMES,
+    MODEL_FEATURES,
     extract,
 )
 
@@ -370,7 +372,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     print(f"training corpus   {len(train_x)} rows, {sum(train_y)} positive "
           f"({sum(train_y) / len(train_y):.1%})")
-    print(f"features          {len(FEATURE_NAMES)}")
+    print(f"features          {len(MODEL_FEATURES)} fitted of {len(FEATURE_NAMES)} produced")
     print(f"\nbounds to read every figure against")
     print(f"  human ceiling     kappa {HUMAN_CEILING:.3f}")
     print(f"  teacher (Sonnet)  kappa {TEACHER_CEILING:.3f}")
@@ -388,8 +390,8 @@ def main(argv: list[str] | None = None) -> int:
         print("=" * 70)
         baseline = _repo_prior_baseline(train_y, repos)
         _report_loro(baseline, "BASELINE: the pooled rate of the other repositories")
-        loro_full = leave_one_repo_out(train_x, train_y, repos, FEATURE_NAMES)
-        _report_loro(loro_full, f"MODEL: all {len(FEATURE_NAMES)} features")
+        loro_full = leave_one_repo_out(train_x, train_y, repos, MODEL_FEATURES)
+        _report_loro(loro_full, f"MODEL: the {len(MODEL_FEATURES)} fitted features")
         print(f"\n  model minus baseline:  AUC {_macro(loro_full, 'auc') - _macro(baseline, 'auc'):+.3f}"
               f"   kappa {_macro(loro_full, 'kappa') - _macro(baseline, 'kappa'):+.3f}")
         print("\n  AUC is the figure to read: the deliverable ranks a review queue,")
@@ -402,7 +404,17 @@ def main(argv: list[str] | None = None) -> int:
         print("  A feature that only works inside a repository shows no gain here.")
         print("  " + "-" * 62)
         for group, members in FEATURE_GROUPS.items():
-            kept = tuple(n for n in FEATURE_NAMES if n not in members)
+            if group in EXCLUDED_GROUPS:
+                # Removing a group the model was never fitted on cannot change
+                # anything, and printing a +0.000 delta for it reads as "this
+                # group is useless" when the truth is "this group is already
+                # out". The reason it is out belongs on the row.
+                print(
+                    f"  without {group:<12} not fitted -- excluded at "
+                    f"-0.069 AUC, see EXCLUDED_GROUPS"
+                )
+                continue
+            kept = tuple(n for n in MODEL_FEATURES if n not in members)
             if not kept:
                 continue
             loro_without = leave_one_repo_out(train_x, train_y, repos, kept)
@@ -412,14 +424,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  without {group:<12} AUC {score:.3f}   delta {delta:+.3f}   {verdict}")
 
     if args.cv or not (args.ablate or args.final or args.loro or args.loro_ablate):
-        _report_cv(_cross_validate(train_x, train_y, FEATURE_NAMES), "cross-validated")
+        _report_cv(_cross_validate(train_x, train_y, MODEL_FEATURES), "cross-validated")
 
     if args.ablate:
-        full = _cross_validate(train_x, train_y, FEATURE_NAMES, repeats=2)
+        full = _cross_validate(train_x, train_y, MODEL_FEATURES, repeats=2)
         _, base, _ = _spread(full, "f1")
         print(f"\nablation -- F1 with each group removed (full model {base:.3f})")
         for group, members in FEATURE_GROUPS.items():
-            kept = tuple(n for n in FEATURE_NAMES if n not in members)
+            kept = tuple(n for n in MODEL_FEATURES if n not in members)
             if not kept:
                 continue
             without = _cross_validate(train_x, train_y, kept, repeats=2)
@@ -437,7 +449,7 @@ def main(argv: list[str] | None = None) -> int:
         model = fit(
             train_x,
             train_y,
-            names=FEATURE_NAMES,
+            names=MODEL_FEATURES,
             steps=6000,
             provenance={
                 "trained_on": "benchmark/train-labels.jsonl",

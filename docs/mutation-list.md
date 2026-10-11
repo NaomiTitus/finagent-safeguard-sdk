@@ -84,6 +84,91 @@ row here is itself a review finding.
 | **A11** | **Replace `TOOL_REGISTRY` with a dict whose `get` always answers** | **none — see F-007** | **NOT CAUGHT** |
 | **A12** | **Reassign `agent.tools` after construction** | **none — see F-008** | **NOT CAUGHT** |
 
+## `cli/features.py`
+
+The feature module is **advisory research code, not a guard**: nothing in the
+linter's write path reads a feature, so no mutation here can mislabel a
+function. What these rows protect is the *claim each feature's name makes* —
+and that claim has been wrong twice already. `sensitive_subscripts` shipped
+counting subscript **writes** as sensitive reads, which made the blank-node
+builder outscore the function that reads a real party name: the feature fired
+backwards while every aggregate number still looked plausible. "The model still
+scores about the same" is therefore not evidence that a feature works.
+
+| # | Mutation | Expected killer | Status |
+|---|---|---|---|
+| F1 | Drop `transfer` from `ACTION_VERBS` | `test_an_action_verb_is_recognised` | caught |
+| F2 | Drop `get` from `QUERY_VERBS` | `test_a_query_verb_is_recognised` | caught |
+| F3 | Drop `validate` from `CHECK_VERBS` | `test_a_check_verb_is_recognised` | caught |
+| F4 | Drop `.to_excel` from `SINK_CALLS` | `test_a_write_call_is_a_sink` | caught |
+| F5 | Drop the mock markers, so test doubles read as real sinks | `test_a_mocked_transport_is_detected` | caught |
+| F6 | Misspell the commonest party-key literal | `test_a_party_key_literal_is_detected` | caught |
+| F7 | Remove `"name"` from `SENSITIVE_KEYS` — the exact gap in `PII_TOKENS` that made the old `party_key` unable to fire on `self._config['name']` | `test_reading_a_party_name_out_of_a_mapping_is_sensitive` | caught |
+| **F8** | **Count subscript *writes* as sensitive reads — the bug the feature actually shipped with** | `test_writing_into_a_slot_named_for_a_party_is_not` | caught |
+| F9 | Count repeated reads of one key as distinct keys | `test_distinct_keys_are_counted_not_repeated_reads` | caught |
+| F10 | See only `x['k']` and not `x.get('k')`, measuring house style | `test_a_mapping_read_through_get_also_counts` | caught |
+| F11 | Remove the count caps, letting one outlier dominate | `test_the_counts_are_capped` | caught |
+| F12 | Fire `callee_vocabulary` on any call at all | `test_a_callee_named_generically_does_not` | caught |
+| F13 | Read an absent docstring as a disclaimer — absent and denied are different states | `test_a_missing_docstring_scores_zero_rather_than_disclaiming` | caught |
+| F14 | Drop `blank`, the word by which the hardest negative announces itself | `test_a_disclaimer_is_detected` | caught |
+| F15 | Take literally the first word as the verb | `test_a_private_class_prefixed_verb_is_still_found` | caught |
+| F16 | Produce a feature under a name the model does not know | `test_extract_returns_the_declared_set` | caught |
+| F17 | Declare one fewer feature than `extract` produces | `test_extract_returns_the_declared_set` | caught |
+| F18 | Pin `FEATURE_NAMES` to one group, so adding a group has no effect | `test_extract_returns_the_declared_set` | caught |
+| **F19** | **Refit the `literal` group, which measured −0.069 LORO AUC** — strongest group under a stratified split (+0.172), worst under leave-one-repository-out | `test_the_harmful_group_is_not_fitted` | caught |
+| F20 | Fit on everything `extract` produces, ignoring `EXCLUDED_GROUPS` entirely | `test_the_harmful_group_is_not_fitted` | caught |
+
+## `cli/classifier.py`
+
+Same standing: the classifier **ranks a review queue, it does not gate**. A
+wrong score misorders a queue; it cannot mislabel a function. These rows cover
+the three ways a stored model can be silently wrong, and the one way the fit
+can stop being a ranker at all.
+
+| # | Mutation | Expected killer | Status |
+|---|---|---|---|
+| M1 | Collapse the sigmoid's sign branch to the naive form | `test_a_confident_margin_does_not_overflow` | caught |
+| M2 | Default a missing feature to zero, scoring an incomplete row | `test_a_missing_feature_is_refused_not_read_as_zero` | caught |
+| M3 | Accept a model fitted on a different feature set | `test_a_model_fitted_on_other_features_is_refused` | caught |
+| M4 | Drop provenance from the serialised model | `test_json_is_readable_rather_than_a_pickle` | caught |
+| M5 | Regularise the intercept, shrinking the base-rate estimate towards zero | `test_the_intercept_learns_the_base_rate` | caught |
+| **M6** | **Let a diverged fit return NaN weights. Every comparison against NaN is False, so the model does not score *badly* — it scores unorderably, ranking the queue at random while returning a float for every row** | `test_a_diverged_fit_is_refused_rather_than_returning_nan` | caught |
+| M7 | Divide by a zero spread — routine in a LORO fold, not exotic | `test_a_constant_feature_still_yields_a_finite_score` | caught |
+
+### Three of these rows were wrong on their first run, and each was informative
+
+The first pass reported 25/25 caught. It was not: M1, M5 and M6 had been
+"killed" only by an unrelated meta-suite failure elsewhere in the same run — a
+test of mine whose *name* promised a rejection while its body asserted a
+positive property. With the suite green the three survived, and each survival
+was a different kind of finding.
+
+**M1 — a dead guard.** `sigmoid` clamped z to ±500 inside each arm of a sign
+branch, and the mutation removing the clamps survived because *the branch alone
+prevents the overflow*: each arm only ever exponentiates a non-positive number.
+The clamps were unreachable. They have been removed, because a dead guard that
+looks like the safety mechanism is worse than no guard — the next reader trusts
+it and removes the branch. M1 now mutates the branch, and is caught.
+
+**M5 — a tolerance looser than its own claim.** The test asserted the fit
+recovers a 0.10 base rate to `abs=0.03`. Regularising the intercept moves it to
+0.1199, which that tolerance admits. With uninformative features the
+maximum-likelihood intercept is exactly `log(p / (1 - p))`, so the fit should
+reach the base rate to within numerical convergence; the tolerance is now
+`abs=0.005` and the row is caught. **A passing test with a tolerance wider than
+the effect it names is indistinguishable from no test.**
+
+**M6 — a malformed mutation, not a hole.** The row read
+`if False and not all(...) or not math.isfinite(intercept)`, which by operator
+precedence reduces to `if not math.isfinite(intercept)` — so the guard still
+fired and the mutation never disabled anything. The guard was restructured to a
+single named condition so a mutation can actually turn it off.
+
+**M6's underlying bug was found by writing these rows, not by the training
+runs.** `fit` accepts an `l2` argument and, for a large enough value at the
+fixed learning rate, diverged and returned NaN weights with no complaint. It
+now refuses.
+
 ## Planned (no code yet)
 
 | # | Mutation | Lands |

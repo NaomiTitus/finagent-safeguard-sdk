@@ -37,7 +37,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from finagent_safeguard.cli.features import FEATURE_NAMES
+from finagent_safeguard.cli.features import MODEL_FEATURES
 
 __all__ = ["Model", "fit", "sigmoid"]
 
@@ -45,13 +45,21 @@ __all__ = ["Model", "fit", "sigmoid"]
 def sigmoid(z: float) -> float:
     """Logistic function, written to not overflow.
 
-    ``math.exp(800)`` raises OverflowError, and a large positive margin is
-    exactly what a confident model produces, so the naive form fails on the
-    easy cases rather than the hard ones.
+    The naive ``1 / (1 + exp(-z))`` raises OverflowError for z below about
+    -710, and a large margin is exactly what a confident model produces -- so
+    the naive form fails on the *easy* cases while passing every test that
+    stays near the origin.
+
+    **The sign branch is the whole mechanism.** Each arm only ever exponentiates
+    a non-positive number, and ``exp`` of a large negative number underflows to
+    zero rather than raising. An earlier version also clamped z to +/-500 inside
+    each arm; the clamps were unreachable, and a dead guard that looks like the
+    safety mechanism is worse than none, because the next reader trusts it and
+    removes the branch.
     """
     if z >= 0.0:
-        return 1.0 / (1.0 + math.exp(-min(z, 500.0)))
-    e = math.exp(max(z, -500.0))
+        return 1.0 / (1.0 + math.exp(-z))
+    e = math.exp(z)
     return e / (1.0 + e)
 
 
@@ -95,12 +103,15 @@ class Model:
     def load(cls, path: Path) -> Model:
         data = json.loads(path.read_text())
         names = tuple(data["feature_names"])
-        if names != FEATURE_NAMES:
+        if names != MODEL_FEATURES:
             # A stored model and a changed feature module is the quiet failure
             # this guards: every score would still be produced, just wrongly.
+            # Compared against MODEL_FEATURES rather than FEATURE_NAMES because
+            # that is the set the weights correspond to; `extract` deliberately
+            # produces more than the model is fitted on.
             raise ValueError(
                 "stored model was fitted on different features; retrain.\n"
-                f"  stored:  {names}\n  current: {FEATURE_NAMES}"
+                f"  stored:  {names}\n  current: {MODEL_FEATURES}"
             )
         return cls(
             weights={str(k): float(v) for k, v in data["weights"].items()},
@@ -117,7 +128,7 @@ def fit(
     l2: float = 1.0,
     rate: float = 0.5,
     steps: int = 4000,
-    names: tuple[str, ...] = FEATURE_NAMES,
+    names: tuple[str, ...] = MODEL_FEATURES,
     provenance: dict[str, str] | None = None,
 ) -> Model:
     """Fit by full-batch gradient descent on the regularised log-likelihood.
@@ -172,6 +183,22 @@ def fit(
     # Back to original units, so the stored coefficients are readable.
     weights = {k: w[j] / spreads[k] for j, k in enumerate(names)}
     intercept = b - sum(w[j] * means[k] / spreads[k] for j, k in enumerate(names))
+
+    # Gradient descent at a fixed rate diverges when `rate * (1 + l2) / n` gets
+    # too large, and the weights go to infinity and then to NaN. The reason to
+    # check rather than to tune: every comparison against NaN is False, so a
+    # model with NaN weights does not score badly -- it scores *unorderably*,
+    # ranking the review queue arbitrarily while still returning a float for
+    # every row. That is the failure mode this project refuses everywhere else,
+    # so it is refused here too.
+    finite = all(math.isfinite(v) for v in weights.values()) and math.isfinite(
+        intercept
+    )
+    if not finite:
+        raise ValueError(
+            f"fit diverged at l2={l2}, rate={rate}: the weights are not finite.\n"
+            f"  Lower the learning rate or the regularisation strength."
+        )
 
     return Model(
         weights=weights,

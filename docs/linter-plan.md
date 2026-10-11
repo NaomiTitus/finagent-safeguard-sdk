@@ -52,7 +52,31 @@ premise of the tool, not buried as a caveat.
 | 3 | ~~`--fix` emits the flag plus candidate citations; diff-only ratchet~~ **done** | `--since REF` ratchets on touched lines, not touched files |
 | 4 | Corpus harvest, pointer-only | licences verified below |
 | 5 | **Owner labels 150 functions, ~2 hrs**, labels frozen and committed | 20 of them twice, a day apart |
-| 6 | Train the binary ranker, measure, write up | |
+| 6 | ~~Train the binary ranker, measure, write up~~ **done** | and the measurement overturned it — see below |
+| 7-8 | LLM annotator experiment: Opus/Sonnet/Haiku, 3 runs each, against the frozen 180 | `docs/llm-annotator-experiment.md` |
+| 9 | 996-item training corpus labelled by Sonnet | `benchmark/train-labels.jsonl` |
+| 10 | **Leave-one-repository-out**, and the confounder it found | `docs/feature-measurement.md` |
+| 10 | `dataflow` + `docstring` features; `literal` group excluded | LORO AUC 0.645 → **0.774** |
+| 10 | Embedding experiment, with a stated bar, and the verdict was no | `docs/embedding-experiment.md` |
+
+### What day 10 changed about days 1-6
+
+The plan above assumed the measurement would be *stratified cross-validation
+against the hand labels*. It was, and it was wrong — not in its arithmetic but
+in its split. Both corpora draw from the same six repositories, whose positive
+rates run from 0% to 70%, so the same repositories sit on **both sides** of
+every stratified fold. Under that split the model scored respectably and the
+`literal` group (length and punctuation counts) was the single strongest
+contributor.
+
+Held out by repository instead, the ranking inverted: `literal` went from
++0.172 to **−0.069**, and a one-bit "which repository is this?" baseline matched
+the full sixteen-feature model to within noise (paired bootstrap +0.008,
+P(no better) = 0.47). The model had learned the corpus, not the question.
+
+Everything downstream of that — the two new feature groups, the excluded group,
+the embedding experiment and its rejection — follows from changing the split,
+not from changing the model. **The split was the finding.**
 
 ### Day 1 detail: three small things that are not optional
 
