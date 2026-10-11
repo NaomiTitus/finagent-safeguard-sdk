@@ -498,6 +498,17 @@ class StaleFindings(Exception):
     """The file changed between being scanned and being fixed."""
 
 
+class PlanSuperseded(Exception):
+    """The approved edit is not the edit that would now be written.
+
+    Layer 3 of this tool is a human confirming a classification, so the thing
+    being approved has to be *the bytes that land*. Showing a diff in one
+    invocation and recomputing it in the next makes the approval advisory: the
+    file can change in between, and the edit that is written is one nobody
+    looked at.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class FixResult:
     inserted: int
@@ -534,14 +545,35 @@ def _render_annotation(finding: Finding) -> list[str]:
         out.append("#   candidates to read before deciding:")
         for candidate in found:
             out.append(f"#     {cite(candidate.provision)} - {candidate.requires}")
+            # The decorator to paste, so acting on a decision is one keystroke
+            # rather than a trip to the taxonomy to look up a member's
+            # spelling. Phrased as a conditional: the tool has not decided
+            # that the provision applies and must not read as having done so.
+            for category in candidate.files_as:
+                out.append(
+                    "#       if it applies:  "
+                    f"@regulated_tool(FinancialCategory.{category.name})"
+                )
     else:
         out.append(
             "#   no candidate provision: the signal is reachability alone, "
             "which evidences no particular duty."
         )
     out.append(
-        f"# Replace {finding.category} with the category you have confirmed."
+        f"# Replace {finding.category} with the categories you have confirmed."
     )
+    if len(finding.vocabularies) > 1:
+        # Said explicitly only when the function matched more than one
+        # vocabulary, because that is when it is most often true and least
+        # often noticed. `regulated_tool` does not wrap -- it records and
+        # returns the function -- so stacking is order-independent, and
+        # leaving REVIEW_REQUIRED stacked alongside a confirmed category
+        # still fails the gate.
+        out.append(
+            "#   More than one may apply: @regulated_tool stacks, "
+            "and this function matched "
+            f"{' and '.join(finding.vocabularies)}."
+        )
     return out
 
 
@@ -697,16 +729,41 @@ def _only_insertions(before: bytes, after: bytes) -> list[str]:
 
 @dataclass(frozen=True, slots=True)
 class FixPlan:
-    """What --fix would do, worked out without touching the file."""
+    """What --fix would do, worked out without touching the file.
+
+    Carries the digest of the bytes it was computed *from* and the digest of
+    the bytes it would produce, so an approval can name a specific edit rather
+    than a general intention.
+    """
 
     path: Path
     new_bytes: bytes
     diff: str
     functions: list[str]
+    #: SHA-256 of the file's bytes as they were when this plan was computed.
+    #: Checked again at write time: if the file has moved on, the plan is stale
+    #: and the approval belonged to an edit that no longer exists.
+    base_sha: str
+    #: SHA-256 of ``new_bytes``. This is what a human approves, and what
+    #: ``--expect-plan`` compares against. Digesting the *result* rather than
+    #: the inputs means two different routes to the same bytes agree, and any
+    #: difference in what would land -- however it arose -- disagrees.
+    plan_sha: str
 
     @property
     def inserted(self) -> int:
         return len(self.functions)
+
+    @property
+    def short_sha(self) -> str:
+        """The first 12 hex digits, for a human to copy from a terminal.
+
+        Twelve is git's abbreviation length for large repositories: enough that
+        an accidental collision is not a practical concern, short enough to
+        retype. ``--expect-plan`` accepts this or the full digest, and compares
+        on the prefix, so a user is never asked to paste 64 characters.
+        """
+        return self.plan_sha[:12]
 
 
 def plan_fix(path: Path, findings: list[Finding]) -> FixPlan:
@@ -739,8 +796,12 @@ def plan_fix(path: Path, findings: list[Finding]) -> FixPlan:
     if unknown:
         raise StaleFindings(f"{path}: {unknown} are not findings for this file")
 
+    base_sha = hashlib.sha256(raw).hexdigest()
     if not findings:
-        return FixPlan(path=path, new_bytes=raw, diff="", functions=[])
+        return FixPlan(
+            path=path, new_bytes=raw, diff="", functions=[],
+            base_sha=base_sha, plan_sha=base_sha,
+        )
 
     # Split the way Python's own tokenizer does, and keep each line's ending.
     #
@@ -827,20 +888,54 @@ def plan_fix(path: Path, findings: list[Finding]) -> FixPlan:
     return FixPlan(
         path=path, new_bytes=new_bytes, diff=diff,
         functions=[f.function for f in findings],
+        base_sha=base_sha,
+        plan_sha=hashlib.sha256(new_bytes).hexdigest(),
     )
 
 
-def apply_fix(path: Path, findings: list[Finding]) -> FixResult:
-    """Write the verified plan. Atomically, or not at all."""
+def apply_plan(plan: FixPlan, *, expect: str | None = None) -> FixResult:
+    """Write *this* plan's bytes. Atomically, or not at all.
+
+    Takes the plan rather than recomputing one, so the bytes a developer was
+    shown are the bytes that land. Two checks stand between the approval and
+    the write:
+
+    ``expect`` is the digest the developer approved, from ``--diff-only``. If
+    the plan now says something else, the approval was for a different edit.
+
+    ``base_sha`` is re-read from disk. The file can change between being shown
+    and being written -- a colleague's commit, a rebase, a formatter, the
+    developer's own editor -- and an atomic write would happily overwrite it
+    with content computed from the old version. This is the one race the
+    separation of plan and write exists to close; without it, splitting them
+    only widens the window.
+    """
+    path = plan.path
     if not os.access(path, os.W_OK):
         raise RefusedTarget(
             f"{path} is read-only. An atomic rename only needs a writable "
             "directory, so this would have succeeded silently -- and read-only "
             "usually means do not touch."
         )
-    plan = plan_fix(path, findings)
+    if expect is not None and not plan.plan_sha.startswith(expect.lower()):
+        raise PlanSuperseded(
+            f"{path}: approved plan {expect} is not the plan that would be "
+            f"written now ({plan.short_sha}).\n"
+            "  The file, the rule, or the candidate provisions have changed "
+            "since you looked.\n"
+            "  Re-run with --diff-only, read the new edit, and approve that one."
+        )
     if not plan.functions:
         return FixResult(inserted=0, functions=[])
+
+    on_disk = hashlib.sha256(path.read_bytes()).hexdigest()
+    if on_disk != plan.base_sha:
+        raise StaleFindings(
+            f"{path} changed after this edit was computed. Nothing written.\n"
+            f"  planned against {plan.base_sha[:12]}, found {on_disk[:12]}.\n"
+            "  Re-scan: the insertion points describe content that is no longer "
+            "there."
+        )
 
     mode = path.stat().st_mode
     tmp = path.with_name(f"{path.name}.{os.getpid()}.finagent-tmp")
@@ -852,6 +947,19 @@ def apply_fix(path: Path, findings: list[Finding]) -> FixResult:
         tmp.unlink(missing_ok=True)
 
     return FixResult(inserted=plan.inserted, functions=plan.functions)
+
+
+def apply_fix(
+    path: Path, findings: list[Finding], *, expect: str | None = None
+) -> FixResult:
+    """Plan an edit and write it in one step.
+
+    The convenience form, and what ``--fix`` uses without ``--expect-plan``.
+    Note that nothing human-visible happens between the plan and the write
+    here, so there is nothing to approve: for that, call ``plan_fix``, show
+    ``plan.diff``, then ``apply_plan``.
+    """
+    return apply_plan(plan_fix(path, findings), expect=expect)
 
 
 # --------------------------------------------------------------------------
@@ -868,6 +976,10 @@ def apply_fix(path: Path, findings: list[Finding]) -> FixResult:
 ADVISORY_SIGNALS: Final[frozenset[str]] = frozenset({"bank_client_import"})
 
 _UNRESOLVED = "REVIEW_REQUIRED"
+
+#: A plan digest, abbreviated or whole. Validated before use so a typo is a
+#: usage error rather than a refusal the user reads as "the file changed".
+_HEX: Final[re.Pattern[str]] = re.compile(r"[0-9a-fA-F]{6,64}")
 
 
 def unresolved_functions(source: str) -> list[str]:
@@ -1044,6 +1156,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--expect-plan",
+        metavar="SHA",
+        help=(
+            "with --fix, write only if the edit still matches the plan you "
+            "approved. --diff-only prints the digest to pass here. Refuses "
+            "rather than writing a different edit."
+        ),
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help=f"also fail on advisory signals ({', '.join(sorted(ADVISORY_SIGNALS))})",
@@ -1052,6 +1173,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.fix and args.diff_only:
         parser.error("--fix and --diff-only are contradictory; pick one")
+    if args.expect_plan and not args.fix:
+        parser.error("--expect-plan only means something with --fix")
+    if args.expect_plan and not _HEX.fullmatch(args.expect_plan):
+        parser.error(
+            "--expect-plan takes a hex digest as printed by --diff-only, "
+            f"not {args.expect_plan!r}"
+        )
 
     touched: dict[Path, set[int]] | None = None
     if args.since:
@@ -1085,7 +1213,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             source = read_source(path)
         except (OSError, UnparseableSource) as exc:
-            failures.append(f"{path}: {exc}")
+            failures.append(str(exc))
             continue
 
         try:
@@ -1098,7 +1226,7 @@ def main(argv: list[str] | None = None) -> int:
             # looked like "the tool worked and found something" when in fact it
             # had fallen over -- the one confusion the 1/2 split exists to
             # prevent.
-            failures.append(f"{path}: {exc}")
+            failures.append(str(exc))
             continue
 
         for name in still_open:
@@ -1132,14 +1260,22 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 plan = plan_fix(path, findings)
             except (RefusedTarget, StaleFindings, UnsafeEdit) as exc:
-                failures.append(f"{path}: {exc}")
+                failures.append(str(exc))
                 continue
             print(plan.diff, end="" if plan.diff.endswith("\n") else "\n")
+            if plan.functions:
+                # The handle that makes the approval binding. Printed next to
+                # the diff it names, so the thing a developer copies is tied to
+                # the thing they just read.
+                print(f"  plan {plan.short_sha}  "
+                      f"--fix --expect-plan {plan.short_sha}")
         elif args.fix:
             try:
-                result = apply_fix(path, findings)
-            except (RefusedTarget, StaleFindings, UnsafeEdit) as exc:
-                failures.append(f"{path}: {exc}")
+                result = apply_fix(path, findings, expect=args.expect_plan)
+            except (
+                RefusedTarget, StaleFindings, UnsafeEdit, PlanSuperseded
+            ) as exc:
+                failures.append(str(exc))
                 continue
             written += result.inserted
             print(f"  fixed {path}: {result.inserted} flag(s) inserted")

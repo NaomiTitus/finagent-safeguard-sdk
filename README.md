@@ -40,8 +40,26 @@ With `--diff-only`, the edit it *would* make — written to stdout, not to disk:
      bank_client.execute_transfer(iban, amount)
 ```
 
-Note what it wrote: **`REVIEW_REQUIRED`**, not a category. And if you ship that
-without deciding, the runtime gate refuses to construct the agent:
+Note what it wrote: **`REVIEW_REQUIRED`**, not a category.
+
+That diff ends with a digest of itself, and `--fix` will write **only** that
+edit:
+
+```
+  plan 113eba20a6dc  --fix --expect-plan 113eba20a6dc
+```
+
+If the file, the rule, or the candidate provisions have moved on since you read
+it, the write is refused rather than applying an edit nobody looked at:
+
+```
+error: pay.py: approved plan 113eba20a6dc is not the plan that would be
+written now (a9cc04c4a6e0).
+  Re-run with --diff-only, read the new edit, and approve that one.
+```
+
+And if you ship `REVIEW_REQUIRED` without deciding, the runtime gate refuses to
+construct the agent:
 
 ```
 UnregulatedToolError: 1 tool(s) passed to this agent carry
@@ -78,7 +96,7 @@ silent about.
 |---|---|---|---|
 | 1 | **AST rule** | Deterministic tree walk — money/PII vocabulary in signatures, import resolution, sink calls | **Yes**, exit 1 |
 | 2 | **Candidates** | Signal → candidate provisions, drawn only from pinned regulatory text | No |
-| 3 | **Human confirms** | `--fix` writes `REVIEW_REQUIRED` + citations; the agent gate refuses it | **This is the control** |
+| 3 | **Human confirms** | `--diff-only` shows the exact edit and a digest; `--fix --expect-plan` writes only that edit; the agent gate refuses `REVIEW_REQUIRED` | **This is the control** |
 | 4 | **Classifier** | Ranks a review queue by probability. Nothing in the write path reads it | No — advisory |
 
 Layer 4 being advisory is what makes it admissible at all: a wrong score
@@ -262,13 +280,9 @@ it claims to solve.
   macro average of three repositories. That — not the model, not the features —
   is the binding constraint on all of it.
 - **`--check` does not detect a changed claim**, only a changed rubric or corpus.
-- **`plan_fix` and `apply_fix` do not yet connect**, so a human cannot approve
-  the exact edit before it is written. This is a gap in layer 3, which is the
-  control.
 
 ## Next
 
-- Connect `plan_fix` to `apply_fix` so the confirmed edit is the applied edit.
 - More repositories in the corpus. At three scoreable folds, more
   repositories are worth more than more features — one result in sixteen is
   already spurious by chance.

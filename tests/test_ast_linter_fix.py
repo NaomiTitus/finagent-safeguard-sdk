@@ -366,7 +366,16 @@ class TestPartialFindings:
         findings = linter.scan_file(p)
         result = linter.apply_fix(p, [findings[1]])
         assert result.functions == ["two"]
-        assert p.read_text().count("@regulated_tool(") == 1
+        # Counted as *applied decorator lines*, not as occurrences of the
+        # substring. The annotation now also suggests a decorator per candidate
+        # provision inside comments, so a substring count conflates "one
+        # decorator was applied" with "five were mentioned" -- and it is the
+        # first that this test exists to pin.
+        applied = [
+            line for line in p.read_text().splitlines()
+            if line.lstrip().startswith("@regulated_tool(")
+        ]
+        assert len(applied) == 1, applied
 
     def test_an_empty_list_is_a_no_op_not_an_error(self, tmp_path: Path) -> None:
         p = tmp_path / "m.py"
@@ -530,12 +539,141 @@ class TestPlanBeforeWrite:
         assert p.read_bytes() == before, "planning must not write"
 
     def test_the_plan_is_what_gets_written(self, tmp_path: Path) -> None:
-        """The diff a developer approves must be the bytes that land."""
+        """The plan a developer approves must be the bytes that land.
+
+        Strengthened: this used to re-plan and compare, which cannot fail. Two
+        plans of an unchanged file agree whether or not the write honours the
+        approval, so the test passed without testing its own claim. It now
+        applies **the plan object**, which is the only version of this that
+        distinguishes the two.
+        """
         p = tmp_path / "m.py"
         p.write_text(SIMPLE)
         plan = linter.plan_fix(p, linter.scan_file(p))
-        linter.apply_fix(p, linter.scan_file(p))
+        linter.apply_plan(plan)
         assert p.read_bytes() == plan.new_bytes
+
+
+class TestTheApprovalIsBinding:
+    """Layer 3 of this tool is a human confirming a classification, so the
+    thing approved has to be the bytes that land.
+
+    Before this, `--diff-only` showed a diff and `--fix` recomputed one. The
+    approval was advisory: the file could change in between, and what got
+    written was an edit nobody had looked at.
+    """
+
+    def test_a_plan_carries_the_digest_of_its_own_output(
+        self, tmp_path: Path
+    ) -> None:
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        plan = linter.plan_fix(p, linter.scan_file(p))
+        import hashlib
+
+        assert plan.plan_sha == hashlib.sha256(plan.new_bytes).hexdigest()
+        assert plan.base_sha == hashlib.sha256(SIMPLE.encode()).hexdigest()
+        assert plan.short_sha == plan.plan_sha[:12]
+
+    def test_the_same_source_plans_to_the_same_digest(
+        self, tmp_path: Path
+    ) -> None:
+        """Otherwise a developer could not approve anything: the digest they
+        copied would never match on the next invocation."""
+        first, second = tmp_path / "a.py", tmp_path / "b.py"
+        for each in (first, second):
+            each.write_text(SIMPLE)
+        a = linter.plan_fix(first, linter.scan_file(first))
+        b = linter.plan_fix(second, linter.scan_file(second))
+        assert a.plan_sha == b.plan_sha
+
+    def test_approving_a_different_edit_is_refused(self, tmp_path: Path) -> None:
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        before = p.read_bytes()
+        with pytest.raises(linter.PlanSuperseded, match="not the plan"):
+            linter.apply_fix(p, linter.scan_file(p), expect="deadbeefcafe")
+        assert p.read_bytes() == before, "a refused approval must write nothing"
+
+    def test_the_approved_digest_is_accepted(self, tmp_path: Path) -> None:
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        plan = linter.plan_fix(p, linter.scan_file(p))
+        result = linter.apply_fix(
+            p, linter.scan_file(p), expect=plan.short_sha
+        )
+        assert result.inserted == 1
+        assert p.read_bytes() == plan.new_bytes
+
+    def test_an_edit_that_changed_since_approval_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """The case the whole mechanism exists for.
+
+        A developer reads a diff, then the file moves on -- a colleague's
+        commit, a rebase, a formatter, their own editor. The digest they
+        approved now names an edit that would not be produced, so the write is
+        refused rather than silently applying the edit they did not see.
+        """
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        approved = linter.plan_fix(p, linter.scan_file(p)).short_sha
+
+        p.write_text(SIMPLE + "\n\ndef charge(pan, amount):\n    pass\n")
+        with pytest.raises(linter.PlanSuperseded):
+            linter.apply_fix(p, linter.scan_file(p), expect=approved)
+        assert b"REVIEW_REQUIRED" not in p.read_bytes()
+
+    def test_a_stale_plan_object_is_refused_at_write_time(
+        self, tmp_path: Path
+    ) -> None:
+        """The race that splitting plan from write would otherwise widen.
+
+        The plan holds bytes computed from one version of the file. If the file
+        changes after planning, an atomic write would cheerfully replace the
+        new content with content derived from the old -- losing the change
+        entirely. `base_sha` is re-read from disk to catch exactly this, which
+        `expect` cannot: the plan matches its own digest perfectly.
+        """
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        plan = linter.plan_fix(p, linter.scan_file(p))
+
+        p.write_text(SIMPLE.replace("pass", "return None"))
+        meanwhile = p.read_bytes()
+        with pytest.raises(linter.StaleFindings, match="changed after"):
+            linter.apply_plan(plan)
+        assert p.read_bytes() == meanwhile, "the other change must survive"
+
+    def test_an_abbreviated_digest_is_enough(self, tmp_path: Path) -> None:
+        """A developer retypes what the terminal printed, not 64 characters."""
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        plan = linter.plan_fix(p, linter.scan_file(p))
+        assert linter.apply_fix(
+            p, linter.scan_file(p), expect=plan.plan_sha[:8]
+        ).inserted == 1
+
+    def test_the_digest_is_matched_case_insensitively(
+        self, tmp_path: Path
+    ) -> None:
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        plan = linter.plan_fix(p, linter.scan_file(p))
+        assert linter.apply_fix(
+            p, linter.scan_file(p), expect=plan.short_sha.upper()
+        ).inserted == 1
+
+    def test_no_approval_still_works(self, tmp_path: Path) -> None:
+        """`--fix` without `--expect-plan` stays a single step.
+
+        Nothing human-visible happens between the plan and the write there, so
+        there is nothing to have approved. Requiring a digest would make the
+        common case hostile without making it safer.
+        """
+        p = tmp_path / "m.py"
+        p.write_text(SIMPLE)
+        assert linter.apply_fix(p, linter.scan_file(p)).inserted == 1
 
 
 class TestLineModel:

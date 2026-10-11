@@ -12,9 +12,23 @@ Why this module and not a field on ``FinancialCategory``
 ``taxonomy/policies.py`` states that a category "deliberately carries no
 threshold, citation or amount", because an enum member asserting a legal fact
 would be exactly as unverified as the YAML key that founded this project's
-original error. That boundary holds. The mapping here is from a **code signal**
-to a **candidate provision** -- not from a category to a law -- so it adds no
-legal content to the taxonomy and the taxonomy still imports nothing.
+original error. That boundary holds: the taxonomy imports nothing from here,
+and no legal content is attached to an enum member.
+
+The mapping here is from a **code signal** to a **candidate provision**, plus
+the **name of the category that would file it**. That second part is a naming
+convenience and is kept deliberately weak:
+
+* It answers *what do I type if I conclude this provision applies?* -- a
+  lookup. It does not answer *does it apply?*, which stays with the developer
+  and is the whole premise of the tool.
+* Where a provision could honestly be filed under more than one category, every
+  plausible one is listed. Narrowing it would be the judgement this module
+  exists not to make, and a single confident answer is precisely what the
+  original guessed-category design got wrong on real code.
+* It is written out per candidate, never derived from the instrument's name by
+  string matching. A derived mapping would silently invent an answer for every
+  provision added later; an explicit one makes someone decide.
 
 Why the mapping is hand-written
 -------------------------------
@@ -36,6 +50,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Final
+
+from finagent_safeguard.taxonomy.policies import FinancialCategory
 
 from finagent_safeguard.regulation.registry import (
     AMLR_ART_19_1_B,
@@ -81,6 +97,16 @@ class Candidate:
     #: because one is about the law and the other is about our inference, and
     #: collapsing them is how an inference starts reading as a legal fact.
     because: str
+    #: The category or categories that would file this provision, so the
+    #: linter can show the exact decorator to paste once a developer has
+    #: decided the provision applies.
+    #:
+    #: A tuple, and sometimes longer than one, on purpose. ``TFR Art 4(4)`` is
+    #: a payer-information control that sits in AML/CFT practice and in payment
+    #: execution both; choosing one for the developer would be asserting the
+    #: thing this module refuses to assert. Listing two costs a line of comment
+    #: and keeps the decision where it belongs.
+    files_as: tuple[FinancialCategory, ...]
 
 
 #: Candidate provisions per token family. Ordered most-specific first, because
@@ -94,6 +120,7 @@ CANDIDATES: Final[dict[str, tuple[Candidate, ...]]] = {
                 "electronic payment transaction"
             ),
             because="the identifiers name a payment or an amount being moved",
+            files_as=(FinancialCategory.PSD2_PAYMENT_EXECUTION,),
         ),
         Candidate(
             provision=PSD2_ART_97_2,
@@ -106,6 +133,7 @@ CANDIDATES: Final[dict[str, tuple[Candidate, ...]]] = {
                 "transactions, so it is the obligation an amount-and-payee "
                 "signature most often attracts"
             ),
+            files_as=(FinancialCategory.PSD2_PAYMENT_EXECUTION,),
         ),
         Candidate(
             provision=TFR_ART_4_4,
@@ -114,6 +142,11 @@ CANDIDATES: Final[dict[str, tuple[Candidate, ...]]] = {
                 "of the payer information"
             ),
             because="a transfer of funds carries payer information with it",
+            # Two, because it is honestly both. See `files_as`.
+            files_as=(
+                FinancialCategory.AML_TRANSACTION_MONITORING,
+                FinancialCategory.PSD2_PAYMENT_EXECUTION,
+            ),
         ),
     ),
     "pii": (
@@ -126,11 +159,13 @@ CANDIDATES: Final[dict[str, tuple[Candidate, ...]]] = {
                 "the identifiers name a person or a national identifier, so the "
                 "question is whether every field taken is needed"
             ),
+            files_as=(FinancialCategory.GDPR_PII_PROCESSING,),
         ),
         Candidate(
             provision=GDPR_ART_32,
             requires="security of processing appropriate to the risk",
             because="personal data in transit through a tool is processing",
+            files_as=(FinancialCategory.GDPR_PII_PROCESSING,),
         ),
     ),
 }
