@@ -102,6 +102,110 @@ silent about.
 Layer 4 being advisory is what makes it admissible at all: a wrong score
 misorders a queue, it cannot mislabel a function.
 
+### How a function reaches a provision
+
+The question this design has to answer is *how do you suggest the right law
+rather than all of them?* — because a category is one-to-many, and looking up
+"everything tagged PSD2" would be useless.
+
+The answer is that **there is no category → law lookup.** One dictionary
+exists, and it is keyed by what the AST actually found:
+
+```python
+CANDIDATES = {
+    "money": (PSD2 Art 97(1)(b), PSD2 Art 97(2), TFR Art 4(4)),
+    "pii":   (GDPR Art 5(1)(c), GDPR Art 32),
+}
+```
+
+```
+code  →  signal ("name")              how it was detected
+      →  vocabularies ("money","pii") which word families matched — the key
+      →  provisions (5 of 23 pinned)  a hand-written lookup
+      →  categories                   comments only, for the human to paste
+```
+
+Three signals exist, tried in order of how much they tell you:
+
+| Signal | Fires when | Gates CI |
+|---|---|---|
+| `name` | an identifier matched the money or person vocabulary | yes |
+| `type` | an annotation names a risky type (`Decimal`, an IBAN type) | yes |
+| `bank_client_import` | the module can reach a bank client, and nothing more specific fired | **advisory only** |
+
+The last is deliberately broad — it is the net for functions no naming
+convention would reveal — and on 155 top-level stdlib modules it produced **51
+flags and 0 correct ones**. A build failing on that fails constantly and gets
+switched off, so it is always reported and only counted under `--strict`.
+
+The *vocabularies* are what narrow the provision set; categories are derived
+**last**, for display.
+
+Three filters do the narrowing, and none of them is the category:
+
+| Filter | Provisions surviving |
+|---|---|
+| pinned in `corpus/` with a SHA-256 | 23 citable |
+| evidenceable from a function signature | **5 reachable** |
+| matching *this* function's vocabularies | 3 (money) or 2 (pii) |
+
+The middle filter is the substantive one. **18 of 23 are recorded as
+`UNREACHABLE`, each with its reason** — *"a third-country transfer depends on
+where the endpoint is, which the current signals do not inspect"*; *"data
+protection by design is a property of a system's architecture, not of a
+function"*; *"a permission addressed to Member States, not a duty on a
+controller, so no function can discharge it."* A test fails if a newly pinned
+provision appears in neither the mapping nor that list, so the candidate set
+can only grow by a deliberate act.
+
+The mapping is hand-written on purpose. Every production tool in this space
+does the same: CodeQL's sensitive-data classifier is a word list plus
+identifier regexes, Bearer is pattern matching over 122 data types with any
+machine learning used offline to *author* rules and never at scan time, Privado
+is 107 regex data elements with a `tags/law` column. What makes it checkable is
+not the algorithm but the pinning — a reviewer at a bank can read the file in a
+minute, and CI re-verifies every quotation against the committed text.
+
+### What a category is for
+
+Almost nothing, inside the linter. `FinancialCategory` appears there in four
+places: the one constant it writes (`REVIEW_REQUIRED`), a write guard refusing
+any name not in the enum, the `if it applies:` suggestions (which are
+comments), and the rendered decorator — which is always the refusal.
+
+A category is the unit of **the human's decision** and the thing the **runtime
+gate** checks. It is never something the linter computes:
+
+```
+linter  (static)   writes REVIEW_REQUIRED, suggests the rest as comments
+human   (decides)  replaces it with the categories they have confirmed
+gate    (runtime)  refuses to construct an agent still carrying the refusal
+```
+
+`@regulated_tool` stacks, and unions the categories — a money+PII function
+usually needs two. Because registration records the function rather than
+wrapping it, stacking is order-independent. And `REVIEW_REQUIRED` left stacked
+alongside a confirmed category **still fails the gate**, so a half-finished
+decision cannot pass CI.
+
+**What a confirmed category buys, stated exactly.** It makes the gate pass, and
+that is all it does in this version: nothing downstream reads
+`agent.categories`. There is no step that says *you declared
+PSD2_PAYMENT_EXECUTION, therefore Art 97 applies, therefore check SCA*.
+
+So what this delivers is a **coverage** guarantee — you cannot ship an agent
+containing a money- or PII-handling tool that nobody classified — and not a
+correctness one. The enum's own docstring is the design statement: "a coverage
+mechanism, not a correctness mechanism". A category records that a human
+looked, not that they were right.
+
+That boundary is deliberate, and it is why the obligation layer is scaffolding
+rather than content: `Obligation` carries `addressee`, `enforcing` and
+`interpretation_boundary`, is tested, and has **zero instances**. Mapping a
+category to the live duties it attracts is the next layer, and asserting those
+duties without the provenance machinery underneath would reproduce this
+project's founding error in a tidier wrapper.
+
 ### Provenance
 
 Every number in the regulatory registry is one of exactly two things:
@@ -279,10 +383,18 @@ it claims to solve.
   positives against a floor of 10). Every classifier figure here rests on a
   macro average of three repositories. That — not the model, not the features —
   is the binding constraint on all of it.
+- **A confirmed category gates the build and nothing more.** Nothing reads
+  `agent.categories` downstream, so this enforces that a classification *exists*,
+  never that it is correct. `Obligation` and its addressee/enforcement fields are
+  built and tested with **no instances** — the obligation engine is the next
+  layer, not a shipped one.
 - **`--check` does not detect a changed claim**, only a changed rubric or corpus.
 
 ## Next
 
+- The obligation layer: category → the duties it attracts → a runtime check.
+  The `Obligation` dataclass exists for this and is deliberately unpopulated;
+  every instance needs the same provenance a `Provision` has.
 - More repositories in the corpus. At three scoreable folds, more
   repositories are worth more than more features — one result in sixteen is
   already spurious by chance.
