@@ -218,7 +218,13 @@ except SyntaxError as exc:
 json.dumps(_payload)
 `);
   } catch (err) {
-    out.innerHTML = `<pre class="ctx">  ${esc(err)}</pre>`;
+    // The same `[object Object]` trap as the loader had. Fixed in both places:
+    // a scan that throws is rarer than a load that fails, and therefore the
+    // one a visitor is least equipped to work out for themselves.
+    out.innerHTML =
+      `<pre class="ctx">  The scan raised an error, which is a defect.\n\n` +
+      `${describeError(err)}\n\n` +
+      `  github.com/NaomiTitus/finagent-safeguard-sdk/issues</pre>`;
     return;
   }
   render(JSON.parse(result), withEdit);
