@@ -150,6 +150,16 @@ def main(argv: list[str] | None = None) -> int:
         _run("layer 1a: mutation baseline", [sys.executable, "tools/run_mutations.py", "--check"],
              env={"PYTHONDONTWRITEBYTECODE": "1"}),
         _run("layer 1b: vacuity", [sys.executable, "-m", "pytest", "tests/test_meta_suite.py", "-q", "--no-header"]),
+        # Documentation drifts from code within a single session: a help string
+        # described an implementation replaced twenty minutes earlier, and four
+        # README counts went stale in an afternoon. Only the checkable part can
+        # be gated, and that is what this checks.
+        _run("layer 1d: documented claims", [sys.executable, "tools/audit_docs.py"]),
+        # The browser demo runs the real package, from a generated bundle. If
+        # the bundle goes stale the demo shows behaviour no test covers --
+        # which is worse than having no demo, because it carries the
+        # repository's name.
+        _run("layer 1e: demo bundle", [sys.executable, "tools/build_demo.py", "--check"]),
     ]
 
     print("-" * 70)

@@ -430,3 +430,122 @@ Every review has found at least one defect of the same shape: **the tool reporti
 while being wrong**. Not crashes — crashes are cheap. The expensive class is a confident
 `classified` on a function that is not protected. Reviews 1, 3 and 4 each found one. That is
 the failure mode this project exists to prevent, which makes it the one to keep hunting.
+
+---
+
+## 2026-10-11 — the classifier was measuring the corpus, and six other findings
+
+A long session, and the pattern it confirmed is worth more than any single
+finding: **every defect below was found by checking a claim, not by reading
+code.** Five of them were in work written earlier the same day.
+
+### F-016: the model's skill was repository identity
+
+A one-bit baseline — *is this `python-sepaxml`?* — scored κ 0.503 against the
+sixteen-feature model's 0.511. Paired bootstrap on the difference: **+0.008**,
+95% CI [−0.182, +0.208], **P(model no better than one bit) = 0.47**.
+
+Undetectable by construction under the split in use. All six repositories
+appear on both sides of every stratified fold, and their positive rates run
+from 0% to 70%, so recognising the codebase *is* a winning strategy.
+Leave-one-repository-out inverted the feature ranking: the `literal` group went
+from the strongest contributor (+0.172) to the worst (**−0.069**).
+
+Fixed by changing the split, **then the features**: 0.576 → 0.645 → 0.774 →
+0.793 → **0.798**.
+
+Attributed honestly, because the neat version of this sentence is wrong and was
+written four times before being caught. *The split improved nothing* — it
+lowered the apparent score and showed the earlier number was meaningless. All
++0.222 came from changing the feature set: two groups added, three features
+removed. What the split bought was the ability to tell which of those changes
+transferred, and under the old split three of the five would have been judged
+backwards. `docs/feature-measurement.md`.
+
+### F-017: a figure I had reported was inflated by a leak
+
+A TF-IDF probe was quoted at **0.821** and used to set the bar for the
+embedding experiment. Its vectoriser and SVD basis were fitted on the whole
+corpus, which under leave-one-repository-out leaks the held-out repository's
+own vocabulary into the features it is then scored on. Re-run per fold:
+**0.791**. Bias measured at **+0.042**.
+
+The general rule, now stated in the doc: *anything fitted on the corpus must be
+fitted inside the fold* — a vocabulary, an SVD basis, a scaler, a set of
+nearest-neighbour exemplars. Not just the model weights. Four of five
+experimental arms would have been flattered by getting this wrong.
+
+### F-018: three defects in `classifier.py`, none of which the training runs saw
+
+| # | Defect | Why it was silent |
+|---|---|---|
+| 1 | `fit()` returned **NaN weights** for a large `l2` | Every comparison against NaN is False, so the model did not score *badly* — it scored **unorderably**, ranking the review queue at random while returning a float for every row. |
+| 2 | `sigmoid()`'s ±500 clamps were **dead code** | The sign branch was the whole mechanism; each arm only ever exponentiates a non-positive number. The mutation removing the clamps **survived**, which is how this was found. A dead guard that looks like the safety mechanism is worse than none — the next reader trusts it and removes the branch. |
+| 3 | A test tolerance **wider than the effect it named** | `test_the_intercept_learns_the_base_rate` passed at `abs=0.03` with the intercept regularised, which lands on 0.1199 against a 0.10 base rate. |
+
+### F-019: two vacuous tests, both with accurate names
+
+`test_the_plan_is_what_gets_written` claimed *"the diff a developer approves
+must be the bytes that land"*, then planned and called `apply_fix`, which
+**re-planned**. Two plans of an unchanged file agree whether or not the write
+honours the approval.
+
+`test_a_provision_filed_under_two_categories_shows_both` asserted both category
+names appeared *anywhere* in the comment block.`PSD2_PAYMENT_EXECUTION` is also
+suggested by two other candidates, so narrowing TFR to one category left it
+passing. **Mutation P7 survived and said so.**
+
+Both had bodies that could not fail. Layer 1b tests for assertions; neither of
+these lacked an assertion, which is the gap a mutation row closes and a vacuity
+check cannot.
+
+### F-020: the approval was advisory
+
+`--diff-only` showed a diff and `--fix` recomputed one. Layer 3 of this tool is
+*a human confirming a classification*, and nothing tied the bytes read to the
+bytes written. Closed with a digest of the plan's own output (`--expect-plan`)
+and a re-read of the file at write time (`base_sha`) — the second being the race
+that separating plan from write would otherwise **widen**, since an atomic write
+would replace a colleague's change with content derived from the old version.
+
+### F-021: the mutation doc contradicted the code, four ways
+
+| Defect | Consequence |
+|---|---|
+| `A1` marked `unrun` where `BASELINE` said `not_caught` | A **verified hole** in the agent gate read as something nobody had tried. |
+| `A6`/`A7` **IDs reused** for unrelated mutations | The same identifier meant a verified hole in one file and covered behaviour in the other. Reading either alone gave a confident wrong answer. The documented-only series is now `B1`–`B7`. |
+| `R12` claimed `caught` with **no executable row** | Verification asserted that nobody could run. Made real: the row now exists and is caught — by a different test than the doc named. |
+| The README called the doc "the list" | It covers 61 of 99 rows. `MUTATIONS` is the list; `BASELINE` is what CI enforces. |
+
+Held by `TestTheMutationDocMatchesTheCode`, with a deliberate asymmetry: the doc
+may cover a **subset**, but may not *contradict* the baseline about a row it
+mentions, nor mention a row that does not exist. It found two of the four on
+first execution.
+
+### F-022: `--exclude` shipped a tree-wide false positive for ten minutes
+
+The first implementation used `fnmatch`, whose `*` **crosses a directory
+separator**. So `--exclude '*/test_*.py'` matched
+`~/test_project/src/app/pay.py` — an ancestor directory beginning with `test_`
+was enough to exclude a developer's whole tree, reported only as a count they
+had no reason to question.
+
+Caught by a test, and the mechanism is almost too neat: `pytest` names
+`tmp_path` after the test function, and that name began with `test_`.
+`PurePath.match` replaced it — right-anchored *and* non-crossing, both of which
+are needed, since `fnmatch` anchors left and would have made `--exclude
+'tests/*'` match nothing at all.
+
+### The pattern across five reviews, restated
+
+Reviews 1–4 each found the same shape: **the tool reporting success while being
+wrong**. This session extends it one layer out. F-016 is a *measurement*
+reporting success while being wrong; F-017 a *reported figure*; F-019 two
+*tests*; F-021 the *documentation of the tests*.
+
+The expensive class is not a crash. It is a confident green — and it recurs at
+every level of the stack, including the level that exists to check the level
+below. The counter is the same at each: make the claim refusable by something
+that executes.
+
+Suite is 455 tests. Baseline is 99 rows.

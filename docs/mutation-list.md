@@ -111,6 +111,35 @@ noticed.
 | **B6** | **Replace `TOOL_REGISTRY` with a dict whose `get` always answers** | **none — see F-007** | **NOT CAUGHT** |
 | **B7** | **Reassign `agent.tools` after construction** | **none — see F-008** | **NOT CAUGHT** |
 
+## `cli/linter.py` — path exclusion
+
+A first run that is 80% test-file noise gets the tool switched off, which is
+why `--exclude` exists. It is an **adoption aid, not a security boundary**:
+everything it skips is simply not scanned, so a too-broad pattern fails
+quietly. Hence X3 and X4 — the count and the warning are what make a quiet
+pass visible.
+
+| # | Mutation | Expected killer | Status |
+|---|---|---|---|
+| X1 | Stop matching the pattern itself, so `--exclude` works only via the bare-directory convenience | `test_a_pattern_is_anchored_at_the_right` | caught |
+| **X2** | **Go back to `fnmatch`, whose `*` crosses a directory separator** | `test_a_pattern_does_not_match_across_a_directory_separator` | caught |
+| X3 | Stop reporting how many files were skipped | `test_the_count_is_always_reported` | caught |
+| X4 | Drop the warning for a pattern that matches nothing | `test_a_pattern_matching_nothing_warns` | caught |
+| X5 | Exclude every file whenever `--exclude` is given at all | `test_without_exclude_everything_is_scanned` | caught |
+
+**X2 is a bug this shipped with for about ten minutes.** The first
+implementation used `fnmatch`, whose `*` spans `/`. So
+`--exclude '*/test_*.py'` matched `~/test_project/src/app/pay.py` — an
+ancestor directory beginning with `test_` was enough to exclude a developer's
+entire tree, reported only as a count they had no reason to question. A test
+caught it, because `pytest`'s own `tmp_path` is named after the test function
+and that name began with `test_`.
+
+`PurePath.match` replaced it: right-anchored, and `*` does not cross a
+separator. Both properties are needed — `fnmatch` anchors *left*, so
+`--exclude 'tests/*'` would not have matched `src/tests/x.py` and the obvious
+pattern would have excluded nothing at all.
+
 ## `cli/linter.py` — the approval guard
 
 Layer 3 of this tool is a human confirming a classification, so the bytes

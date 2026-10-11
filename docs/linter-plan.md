@@ -58,6 +58,11 @@ premise of the tool, not buried as a caveat.
 | 10 | **Leave-one-repository-out**, and the confounder it found | `docs/feature-measurement.md` |
 | 10 | `dataflow` + `docstring` features; `literal` group excluded | LORO AUC 0.645 → **0.774** |
 | 10 | Embedding experiment, with a stated bar, and the verdict was no | `docs/embedding-experiment.md` |
+| 10 | `pii_hits` dropped — collinear with a feature derived from it | 0.774 → **0.793** |
+| 11 | `risky_annotation` dropped — harmful; one row in 996, largest weight | 0.793 → **0.798** |
+| 11 | `README.md`, and the per-feature view behind these drops | `--loro-per-feature` |
+| 11 | The approval binds: `--expect-plan`, and `base_sha` re-read at write time | layer 3 was advisory until here |
+| 11 | `--exclude GLOB`, after a first run of 80% test noise | `PurePath.match`, not `fnmatch` |
 
 ### What day 10 changed about days 1-6
 
@@ -174,7 +179,20 @@ Recorded because they are the kind of thing that gets rebuilt by accident.
   exist; its tests run with the rest.
 - `--check` detects a changed rubric or a re-pinned corpus, but **not a changed claim**.
   Editing an obligation leaves its verdict looking current. A claim digest in the run header
-  would close it.
+  would close it. **Still open**, and now stated in the README's limits too.
+- ~~A developer's first run is mostly test-file noise.~~ **Closed** by `--exclude GLOB`,
+  which is an adoption aid rather than a boundary: everything it skips is simply not
+  scanned, so the count excluded is always printed and a pattern matching nothing warns.
+- ~~`plan_fix` and `apply_fix` do not connect, so a human cannot approve the exact
+  edit.~~ **Closed.** `--diff-only` prints a digest of the bytes it showed;
+  `--fix --expect-plan` writes only that edit; and `base_sha` is re-read at write time,
+  because separating the plan from the write would otherwise *widen* the race it exists
+  to close.
+- **Three of six leave-one-out folds are unscoreable, and no amount of further
+  harvesting from these six repositories fixes it.** `cpython-stdlib` has a 0% positive
+  rate because the standard library holds no payment code; `schwifty` has 1% because it
+  is an IBAN *validator*; `pyiso20022` is exhausted at all 66 of its functions. Six
+  scoreable folds needs three further repositories above roughly a 10% positive rate.
 - One entailment claim remains dissented: GDPR Art 5(1)(c), where Haiku 5.5 reads the point as
   passive and naming no addressee while Opus and Sonnet take the structural reading via Art
   5(2). Both are defensible. It stays flagged rather than forced green.

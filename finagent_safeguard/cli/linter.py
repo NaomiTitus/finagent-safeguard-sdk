@@ -29,7 +29,7 @@ import re
 import stat
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Final
 
 from finagent_safeguard.regulation.candidates import candidates_for, cite
@@ -1087,24 +1087,75 @@ def _touched(finding: Finding, touched: dict[Path, set[int]]) -> bool:
     return False
 
 
-def _python_files(paths: list[str]) -> tuple[list[Path], list[str]]:
+def _python_files(
+    paths: list[str], exclude: tuple[str, ...] = ()
+) -> tuple[list[Path], list[str]]:
     """Expand arguments into files, and report what could not be used.
 
     Directories are walked; anything else is taken literally so that a
     misspelled path is an error rather than a silently empty run -- a linter
     that exits 0 because it scanned nothing is worse than one that fails.
+
+    ``exclude`` holds glob patterns matched against each file's path. A file
+    named explicitly on the command line is **still excluded** if it matches:
+    the alternative is that `finagent-lint --exclude 'tests/*' tests/x.py`
+    scans the file anyway, and a flag that silently does not apply is worse
+    than one that is not there.
     """
     found: list[Path] = []
     problems: list[str] = []
     for raw in paths:
         target = Path(raw)
         if target.is_dir():
-            found.extend(sorted(p for p in target.rglob("*.py")))
+            found.extend(sorted(target.rglob("*.py")))
         elif target.is_file():
             found.append(target)
         else:
             problems.append(f"{raw}: no such file or directory")
+    if exclude:
+        found = [f for f in found if not _is_excluded(f, exclude)]
     return found, problems
+
+
+def _is_excluded(path: Path, patterns: tuple[str, ...]) -> bool:
+    """Does any pattern match this path?
+
+    Uses ``PurePath.match``, which is right-anchored and whose ``*`` does not
+    cross a directory separator. Both properties are load-bearing, and neither
+    is true of ``fnmatch``:
+
+    *Right-anchored* means ``--exclude 'tests/*'`` matches
+    ``src/tests/test_pay.py``, which is what a developer typing it expects.
+    ``fnmatch`` anchors at the start, so the obvious pattern would silently
+    exclude nothing.
+
+    *Not crossing separators* is the one a test caught. Under ``fnmatch``,
+    ``--exclude '*/test_*.py'`` matched ``~/test_project/src/app/pay.py``,
+    because ``*`` happily spans ``/`` and an ancestor directory began with
+    ``test_``. A developer whose checkout path contained the pattern would
+    have had their whole tree excluded and been told only by the count.
+
+    Exclusion is an adoption aid, not a security boundary: everything it skips
+    is simply not scanned, so a too-broad pattern fails quietly. That is why
+    the number excluded is always reported, and why a pattern matching nothing
+    warns.
+    """
+    pure = PurePath(path.as_posix())
+    for pattern in patterns:
+        clean = pattern.replace("\\", "/").rstrip("/")
+        if not clean:
+            continue
+        if pure.match(clean):
+            return True
+        # A bare directory name excludes its contents, because that is what
+        # `--exclude tests` plainly means. Expressed as a pattern rather than
+        # by inspecting the filesystem, so it holds for a path that no longer
+        # exists and does not depend on the working directory.
+        if any(part == clean for part in pure.parts):
+            return True
+        if pure.match(f"{clean}/*"):
+            return True
+    return False
 
 
 def _describe(finding: Finding) -> str:
@@ -1156,6 +1207,17 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--exclude",
+        metavar="GLOB",
+        action="append",
+        default=[],
+        help=(
+            "skip files matching GLOB (repeatable). Matched from the right by "
+            "path component, so --exclude 'tests/*' catches src/tests/x.py; a "
+            "* does not cross a / . The number skipped is always reported."
+        ),
+    )
+    parser.add_argument(
         "--expect-plan",
         metavar="SHA",
         help=(
@@ -1195,11 +1257,20 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
 
-    files, problems = _python_files(args.paths or ["."])
+    unfiltered, problems = _python_files(args.paths or ["."])
+    files, _ = _python_files(args.paths or ["."], tuple(args.exclude))
+    skipped = len(unfiltered) - len(files)
     for problem in problems:
         print(f"error: {problem}", file=sys.stderr)
     if problems:
         return 2
+    if args.exclude and not skipped:
+        # Said out loud, because the common mistake is a pattern that matches
+        # nothing and a run that therefore looks clean for the wrong reason.
+        print(
+            f"warning: --exclude {args.exclude} matched no files",
+            file=sys.stderr,
+        )
 
     actionable = 0
     advisory = 0
@@ -1289,6 +1360,11 @@ def main(argv: list[str] | None = None) -> int:
         f"{actionable} actionable, {advisory} advisory, "
         f"{unresolved_total} unresolved."
     )
+    if skipped:
+        # Never silent. Everything --exclude skips is simply not scanned, so
+        # the failure mode of a too-broad pattern is a quiet pass -- and a
+        # number in the summary is what makes that visible.
+        summary += f" {skipped} file(s) excluded."
     if args.fix:
         summary += f" {written} flag(s) written."
     if touched is not None:

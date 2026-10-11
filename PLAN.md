@@ -1,7 +1,23 @@
 # FinAgent-SafeGuard SDK — Implementation Plan
 
-**Status:** design locked, pre-implementation
-**Date:** 2026-10-03
+> **This is the original plan, kept as a record of what was intended. It is not
+> a description of what was built.** For that, read `README.md`, which is the
+> current state and carries the limits.
+>
+> The project was deliberately **rescoped to the linter** partway through. Three
+> items in §10's definition of done below were never built and are not claimed
+> anywhere else: the Grafana dashboard and `docker-compose.yml` (§5.5
+> telemetry), `docs/obligations.md` and its sync test (§5.4), and the SCA
+> obligation engine (Day 4). `Obligation` exists as a dataclass with **zero
+> instances** — see the README's "Next: the obligation engine" for why that is a
+> decision rather than an omission.
+>
+> What *was* built went further than this plan in two places: the classifier
+> (§13 future work) was built and measured leave-one-repository-out, and the
+> approval path gained a binding digest that this plan did not anticipate.
+
+**Status:** superseded by the README. Rescoped to the linter; see the note above.
+**Date:** 2026-10-03, annotated 2026-10-11
 **Scope:** shift-left (CI / import-time / authoring-time) only. Runtime enforcement is deferred to Future Work (§13).
 
 ---
@@ -512,14 +528,20 @@ Report a confusion matrix for any probabilistic component, leading with **false-
 
 ## 10. Definition of done
 
-- `pytest` green on a fresh clone with no API key.
-- `mypy --strict` clean.
-- `docker compose up` yields a populated Grafana dashboard.
-- Every registry number has provenance; every `regulatory_verbatim` number appears in its pinned span.
-- Four bypass tests present and passing.
-- `docs/obligations.md` generated and in sync.
-- README carries the limits and out-of-scope sections.
-- No item from §4.6 appears anywhere in the repo.
+Written before implementation. Marked up against what was actually delivered,
+because a definition of done that quietly moved is not a definition of done.
+
+- ✅ `pytest` green on a fresh clone with no API key.
+- ✅ `mypy --strict` clean.
+- ❌ ~~`docker compose up` yields a populated Grafana dashboard.~~ **Descoped
+  with the telemetry layer.** No `docker-compose.yml` exists.
+- ✅ Every registry number has provenance; every `regulatory_verbatim` number
+  appears in its pinned span — and a CI job re-checks it on every push.
+- ✅ Four bypass tests present and passing.
+- ❌ ~~`docs/obligations.md` generated and in sync.~~ **Descoped with the
+  obligation engine.** There are no `Obligation` instances to render.
+- ✅ README carries the limits and out-of-scope sections.
+- ✅ No item from §4.6 appears anywhere in the repo.
 
 ---
 

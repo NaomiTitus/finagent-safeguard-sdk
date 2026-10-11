@@ -10,7 +10,7 @@ Three reasons, and the third is the one that matters.
 The SDK is stdlib-only by design, so a dependency would be a change of
 character rather than a convenience. A pickled estimator is a binary blob
 nobody can review and that breaks on a library version bump. And a reviewer at
-a bank can read sixteen named coefficients in a minute and see exactly what the
+a bank can read fifteen named coefficients in a minute and see exactly what the
 model believes -- which is the same reason CodeQL ships word lists and Bearer
 ships rules rather than weights.
 
